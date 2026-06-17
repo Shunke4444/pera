@@ -48,3 +48,21 @@ export function recentMonths(endKey: string, count: number): string[] {
   for (let i = count - 1; i >= 0; i--) out.push(shiftMonth(endKey, -i))
   return out
 }
+
+/** Epoch ms at the first instant of a "YYYY-MM" month (local). */
+export function monthStartMs(key: string): number {
+  const [y, m] = key.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, 1).getTime()
+}
+
+/** Epoch ms at the last instant of a "YYYY-MM" month (local). */
+export function monthEndMs(key: string): number {
+  const [y, m] = key.split('-').map(Number)
+  return new Date(y, m ?? 1, 1).getTime() - 1
+}
+
+/** "YYYY-MM" → "Jun" short label. */
+export function monthShort(key: string): string {
+  const [y, m] = key.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, 1).toLocaleDateString('en-US', { month: 'short' })
+}
