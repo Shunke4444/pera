@@ -4,6 +4,7 @@
 
 import { db, newId, now } from './db'
 import type { Account, Budget, Goal, Transaction } from './types'
+import { importHash, type ParsedRow } from '../lib/importing'
 
 // ---------------------------------------------------------------- accounts ---
 
@@ -265,6 +266,87 @@ export async function archiveGoal(id: string, archived = true): Promise<void> {
 
 export async function deleteGoal(id: string): Promise<void> {
   await db.goals.delete(id)
+}
+
+// ------------------------------------------------------------------ import ---
+
+/** All importHashes already present on an account (for dedup). */
+export async function getAccountImportHashes(accountId: string): Promise<Set<string>> {
+  const rows = await db.transactions.where('accountId').equals(accountId).toArray()
+  return new Set(rows.map((r) => r.importHash).filter(Boolean) as string[])
+}
+
+export interface ImportResult {
+  batchId: string
+  added: number
+  skipped: number
+}
+
+/**
+ * Commit parsed statement rows to an account: dedups via importHash, groups
+ * everything under one importBatchId (so it can be undone), and — crucially —
+ * reconciles the account to a stated ending balance so imports never leave a
+ * wrong balance (the bug Tarsi shipped).
+ */
+export async function commitImport(
+  accountId: string,
+  rows: ParsedRow[],
+  opts: { categoryId?: string; endingBalance?: number } = {},
+): Promise<ImportResult> {
+  const batchId = newId()
+  const ts = now()
+  const existing = await getAccountImportHashes(accountId)
+  const toAdd: Transaction[] = []
+  for (const r of rows) {
+    const h = importHash(accountId, r.date, r.amount, r.description)
+    if (existing.has(h)) continue
+    existing.add(h)
+    toAdd.push({
+      id: newId(),
+      accountId,
+      amount: r.amount,
+      type: r.type,
+      categoryId: opts.categoryId,
+      date: r.date,
+      note: r.description || undefined,
+      importBatchId: batchId,
+      importHash: h,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  }
+
+  await db.transaction('rw', db.accounts, db.transactions, async () => {
+    if (toAdd.length) await db.transactions.bulkAdd(toAdd)
+    if (opts.endingBalance != null) {
+      const acct = await db.accounts.get(accountId)
+      if (acct) {
+        const all = await db.transactions.where('accountId').equals(accountId).toArray()
+        const computed = all.reduce((s, t) => s + t.amount, acct.openingBalance)
+        const delta = opts.endingBalance - computed
+        if (delta !== 0) {
+          await db.transactions.add({
+            id: newId(),
+            accountId,
+            amount: delta,
+            type: 'adjustment',
+            date: ts,
+            note: 'Statement balance reconcile',
+            importBatchId: batchId,
+            createdAt: ts,
+            updatedAt: ts,
+          })
+        }
+      }
+    }
+  })
+
+  return { batchId, added: toAdd.length, skipped: rows.length - toAdd.length }
+}
+
+/** Undo a whole import batch (incl. its reconciliation adjustment). */
+export async function undoImport(batchId: string): Promise<void> {
+  await db.transactions.where('importBatchId').equals(batchId).delete()
 }
 
 /**

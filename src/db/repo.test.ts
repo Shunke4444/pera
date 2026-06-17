@@ -9,8 +9,11 @@ import {
   adjustBalance,
   updateTransfer,
   bulkRecategorize,
+  commitImport,
+  undoImport,
 } from './repo'
 import { accountBalance, netWorth } from '../lib/balances'
+import type { ParsedRow } from '../lib/importing'
 
 beforeEach(async () => {
   await db.delete()
@@ -98,5 +101,40 @@ describe('bulkRecategorize', () => {
     await bulkRecategorize([t1, t2], 'groceries')
     const txns = await db.transactions.bulkGet([t1, t2])
     expect(txns.every((t) => t?.categoryId === 'groceries')).toBe(true)
+  })
+})
+
+describe('commitImport / undoImport', () => {
+  const rows: ParsedRow[] = [
+    { date: new Date(2026, 5, 15).getTime(), amount: -150000, type: 'expense', description: 'Jollibee' },
+    { date: new Date(2026, 5, 16).getTime(), amount: 5000000, type: 'income', description: 'Salary' },
+  ]
+
+  it('adds rows once and reconciles the ending balance', async () => {
+    const { a } = await twoAccounts() // opening 10000
+    // computed after rows = 10000 - 150000 + 5000000 = 4860000; state ending 5000000
+    const res = await commitImport(a, rows, { endingBalance: 5000000 })
+    expect(res.added).toBe(2)
+    const acct = (await db.accounts.get(a))!
+    const txns = await db.transactions.where('accountId').equals(a).toArray()
+    expect(accountBalance(acct, txns)).toBe(5000000)
+  })
+
+  it('re-importing the same file adds nothing (dedup)', async () => {
+    const { a } = await twoAccounts()
+    const first = await commitImport(a, rows)
+    expect(first.added).toBe(2)
+    const second = await commitImport(a, rows)
+    expect(second.added).toBe(0)
+    expect(second.skipped).toBe(2)
+    expect(await db.transactions.where('accountId').equals(a).count()).toBe(2)
+  })
+
+  it('undo removes the whole batch incl. the reconcile adjustment', async () => {
+    const { a } = await twoAccounts()
+    const res = await commitImport(a, rows, { endingBalance: 999999 })
+    expect(await db.transactions.where('accountId').equals(a).count()).toBe(3) // 2 rows + adjust
+    await undoImport(res.batchId)
+    expect(await db.transactions.where('accountId').equals(a).count()).toBe(0)
   })
 })
