@@ -6,6 +6,11 @@ dev-dist
 .env
 .vscode
 
+# TS composite build artifacts (emitted by `tsc -b`)
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Planning docs — local only, never commit
 _local/
 CLAUDE.md
