@@ -1,56 +1,84 @@
 import { useEffect, useState } from 'react'
+import { Trash2 } from 'lucide-react'
 import Modal from '../ui/Modal'
 import { Button, Field, Input, Select } from '../ui/form'
 import { useAccounts, useCategories } from '../hooks'
-import { addTransaction } from '../db/repo'
-import { parseMajorInput } from '../lib/money'
+import {
+  addTransaction,
+  addTransfer,
+  updateTransaction,
+  updateTransfer,
+  deleteTransaction,
+} from '../db/repo'
+import { parseMajorInput, fromMinor } from '../lib/money'
 import { toDateInput, fromDateInput } from '../lib/dates'
+import type { Transaction } from '../db/types'
 
-type Kind = 'expense' | 'income'
+type Mode = 'expense' | 'income' | 'transfer' | 'adjustment'
 
 export default function AddTransactionSheet({
   open,
   onClose,
   defaultAccountId,
+  editTxn,
 }: {
   open: boolean
   onClose: () => void
   defaultAccountId?: string
+  editTxn?: Transaction
 }) {
   const accounts = useAccounts()
   const categories = useCategories()
 
-  const [kind, setKind] = useState<Kind>('expense')
+  const [mode, setMode] = useState<Mode>('expense')
   const [amount, setAmount] = useState('')
   const [accountId, setAccountId] = useState('')
+  const [toAccountId, setToAccountId] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [date, setDate] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
   const [err, setErr] = useState('')
 
-  // Default the account once data + sheet are ready.
+  const editing = !!editTxn
+
+  // (Re)initialise whenever the sheet opens or the edit target changes.
   useEffect(() => {
-    if (open && !accountId) {
+    if (!open) return
+    if (editTxn) {
+      setMode(editTxn.type as Mode)
+      setAmount(String(Math.abs(fromMinor(editTxn.amount))))
+      setDate(toDateInput(editTxn.date))
+      setNote(editTxn.note ?? '')
+      setCategoryId(editTxn.categoryId ?? '')
+      if (editTxn.type === 'transfer') {
+        if (editTxn.amount < 0) {
+          setAccountId(editTxn.accountId)
+          setToAccountId(editTxn.transferAccountId ?? '')
+        } else {
+          setAccountId(editTxn.transferAccountId ?? '')
+          setToAccountId(editTxn.accountId)
+        }
+      } else {
+        setAccountId(editTxn.accountId)
+      }
+    } else {
+      setMode('expense')
+      setAmount('')
+      setCategoryId('')
+      setNote('')
+      setDate(toDateInput(Date.now()))
       setAccountId(defaultAccountId ?? accounts[0]?.id ?? '')
+      setToAccountId('')
     }
-  }, [open, accounts, defaultAccountId, accountId])
-
-  const cats = categories.filter((c) => c.kind === kind)
-
-  const reset = () => {
-    setKind('expense')
-    setAmount('')
-    setCategoryId('')
-    setDate(toDateInput(Date.now()))
-    setNote('')
     setErr('')
-    setAccountId('')
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editTxn])
 
   const close = () => {
-    reset()
     onClose()
   }
+
+  const cats = categories.filter((c) => c.kind === (mode === 'income' ? 'income' : 'expense'))
 
   const save = async () => {
     const minor = parseMajorInput(amount)
@@ -58,48 +86,96 @@ export default function AddTransactionSheet({
       setErr('Enter an amount greater than zero.')
       return
     }
-    if (!accountId) {
-      setErr('Pick an account.')
-      return
+    const ms = fromDateInput(date)
+
+    if (mode === 'transfer') {
+      if (!accountId || !toAccountId) return setErr('Pick both accounts.')
+      if (accountId === toAccountId) return setErr('Transfer needs two different accounts.')
+      if (editing && editTxn?.transferGroupId) {
+        await updateTransfer(editTxn.transferGroupId, { amount: minor, date: ms, note })
+      } else {
+        await addTransfer({
+          fromAccountId: accountId,
+          toAccountId,
+          amount: minor,
+          date: ms,
+          note: note.trim() || undefined,
+        })
+      }
+      return close()
     }
-    await addTransaction({
-      accountId,
-      amount: kind === 'expense' ? -minor : minor,
-      type: kind,
-      categoryId: categoryId || undefined,
-      date: fromDateInput(date),
-      note: note.trim() || undefined,
-    })
+
+    if (!accountId) return setErr('Pick an account.')
+
+    if (mode === 'adjustment') {
+      // Editing an existing adjustment only — keep its sign.
+      const signed = editTxn && editTxn.amount < 0 ? -minor : minor
+      await updateTransaction(editTxn!.id, { amount: signed, date: ms, note: note.trim() || undefined })
+      return close()
+    }
+
+    const signed = mode === 'expense' ? -minor : minor
+    if (editing) {
+      await updateTransaction(editTxn!.id, {
+        amount: signed,
+        type: mode,
+        accountId,
+        categoryId: categoryId || undefined,
+        date: ms,
+        note: note.trim() || undefined,
+      })
+    } else {
+      await addTransaction({
+        accountId,
+        amount: signed,
+        type: mode,
+        categoryId: categoryId || undefined,
+        date: ms,
+        note: note.trim() || undefined,
+      })
+    }
     close()
   }
 
+  const remove = async () => {
+    if (editTxn) await deleteTransaction(editTxn.id)
+    close()
+  }
+
+  const title = editing ? 'Edit transaction' : 'Add transaction'
+  const canModeSwitch = !editing
+
   return (
-    <Modal open={open} onClose={close} title="Add transaction">
+    <Modal open={open} onClose={close} title={title}>
       {accounts.length === 0 ? (
         <p className="text-sm text-muted">Add an account first, then record transactions.</p>
       ) : (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            {(['expense', 'income'] as Kind[]).map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => {
-                  setKind(k)
-                  setCategoryId('')
-                }}
-                className={`rounded-tile border px-3 py-2 text-sm font-semibold capitalize ${
-                  kind === k
-                    ? k === 'expense'
-                      ? 'border-neg text-neg'
-                      : 'border-pos text-pos'
-                    : 'border-border text-muted'
-                }`}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
+          {canModeSwitch && (
+            <div className="grid grid-cols-3 gap-2">
+              {(['expense', 'income', 'transfer'] as Mode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setMode(m)
+                    setCategoryId('')
+                  }}
+                  className={`rounded-tile border px-2 py-2 text-sm font-semibold capitalize ${
+                    mode === m
+                      ? m === 'expense'
+                        ? 'border-neg text-neg'
+                        : m === 'income'
+                          ? 'border-pos text-pos'
+                          : 'border-accent text-accent'
+                      : 'border-border text-muted'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
 
           <Field label="Amount">
             <Input
@@ -111,26 +187,53 @@ export default function AddTransactionSheet({
             />
           </Field>
 
-          <Field label="Account">
-            <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {mode === 'transfer' ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="From">
+                <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                  <option value="">—</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="To">
+                <Select value={toAccountId} onChange={(e) => setToAccountId(e.target.value)}>
+                  <option value="">—</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          ) : (
+            <Field label="Account">
+              <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
 
-          <Field label="Category">
-            <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">— Uncategorized —</option>
-              {cats.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {(mode === 'expense' || mode === 'income') && (
+            <Field label="Category">
+              <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                <option value="">— Uncategorized —</option>
+                {cats.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <Field label="Date">
@@ -143,13 +246,17 @@ export default function AddTransactionSheet({
 
           {err && <p className="text-sm text-neg">{err}</p>}
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex items-center gap-2 pt-1">
             <Button onClick={save} className="flex-1">
-              Save
+              {editing ? 'Save' : 'Add'}
             </Button>
-            <Button variant="ghost" onClick={close}>
-              Cancel
-            </Button>
+            {editing && (
+              <Button variant="danger" onClick={remove} aria-label="Delete transaction">
+                <span className="inline-flex items-center gap-1.5">
+                  <Trash2 size={15} /> Delete
+                </span>
+              </Button>
+            )}
           </div>
         </div>
       )}

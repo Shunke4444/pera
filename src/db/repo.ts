@@ -164,6 +164,27 @@ export async function addTransfer(input: {
   return groupId
 }
 
+/** Edit both legs of a transfer at once (amount magnitude, date, note). */
+export async function updateTransfer(
+  groupId: string,
+  patch: { amount?: number; date?: number; note?: string },
+): Promise<void> {
+  const ts = now()
+  await db.transaction('rw', db.transactions, async () => {
+    const legs = await db.transactions.where('transferGroupId').equals(groupId).toArray()
+    for (const leg of legs) {
+      const next: Partial<Transaction> = { updatedAt: ts }
+      if (patch.amount !== undefined) {
+        const mag = Math.abs(patch.amount)
+        next.amount = leg.amount < 0 ? -mag : mag
+      }
+      if (patch.date !== undefined) next.date = patch.date
+      if (patch.note !== undefined) next.note = patch.note || undefined
+      await db.transactions.update(leg.id, next)
+    }
+  })
+}
+
 /** Re-assign a category to many transactions at once (Activity bulk action). */
 export async function bulkRecategorize(ids: string[], categoryId: string): Promise<void> {
   const ts = now()
