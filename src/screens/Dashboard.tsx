@@ -1,12 +1,22 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Plus } from 'lucide-react'
-import { useAccounts, useTransactions, useNetWorth, useAssetsLiabilities } from '../hooks'
-import { accountBalance } from '../lib/balances'
+import { useNavigate, Link } from 'react-router-dom'
+import { Plus, ShieldAlert, X } from 'lucide-react'
+import {
+  useAccounts,
+  useTransactions,
+  useNetWorth,
+  useAssetsLiabilities,
+  useGoals,
+  useSettings,
+} from '../hooks'
+import { accountBalance, goalProgress, monthKey } from '../lib/balances'
+import { goalStats } from '../lib/goals'
+import { shouldRemindBackup } from '../lib/backup'
 import { formatCompactPHP, formatPHP } from '../lib/money'
 import type { Account } from '../db/types'
 import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
+import GoalRing from '../components/GoalRing'
 import { Button } from '../ui/form'
 import { Dot, Eyebrow, EmptyState, SectionTitle } from '../ui/common'
 
@@ -15,8 +25,26 @@ export default function Dashboard() {
   const txns = useTransactions()
   const netWorth = useNetWorth()
   const { assets, liabilities } = useAssetsLiabilities()
+  const goals = useGoals()
+  const settings = useSettings()
   const [addOpen, setAddOpen] = useState(false)
+  const [hideReminder, setHideReminder] = useState(
+    () => localStorage.getItem('pera-backup-dismissed') === new Date().toDateString(),
+  )
   const navigate = useNavigate()
+
+  const thisMonth = monthKey(Date.now())
+  const spentThisMonth = txns
+    .filter((t) => t.type === 'expense' && monthKey(t.date) === thisMonth)
+    .reduce((s, t) => s + Math.abs(t.amount), 0)
+  const topGoal = goals[0]
+  const remind =
+    !hideReminder && accounts.length > 0 && shouldRemindBackup(settings?.lastBackupAt, Date.now())
+
+  const dismissReminder = () => {
+    localStorage.setItem('pera-backup-dismissed', new Date().toDateString())
+    setHideReminder(true)
+  }
 
   // Preserve bank order by first appearance (accounts already sort-ordered).
   const groups: { bank: string; accounts: Account[] }[] = []
@@ -31,6 +59,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {remind && (
+        <div className="flex items-center gap-2.5 rounded-card border border-warn/40 bg-surface px-3.5 py-3">
+          <ShieldAlert size={18} className="flex-none text-warn" />
+          <Link to="/settings" className="flex-1 text-sm">
+            <span className="font-medium">Back up your data</span>
+            <span className="block text-xs text-muted">Export a copy so it can’t be lost.</span>
+          </Link>
+          <button onClick={dismissReminder} aria-label="Dismiss" className="text-dim hover:text-text">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <section>
         <Eyebrow>Net worth</Eyebrow>
         <p
@@ -52,6 +93,43 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      {accounts.length > 0 && (spentThisMonth > 0 || topGoal) && (
+        <div className="grid grid-cols-2 gap-2.5">
+          <Link
+            to="/insights"
+            className="rounded-card border border-border bg-surface p-3.5"
+          >
+            <Eyebrow>Spent this month</Eyebrow>
+            <p className="mt-1 font-display text-lg font-bold tracking-tight text-neg">
+              {formatCompactPHP(spentThisMonth)}
+            </p>
+          </Link>
+          {topGoal ? (
+            <Link
+              to="/goals"
+              className="flex items-center gap-3 rounded-card border border-border bg-surface p-3.5"
+            >
+              <GoalRing
+                percent={goalStats(topGoal.targetAmount, goalProgress(topGoal, txns, accounts)).pct}
+                size={44}
+                color={topGoal.color || 'var(--accent)'}
+              />
+              <div className="min-w-0">
+                <Eyebrow>Top goal</Eyebrow>
+                <p className="truncate text-xs text-muted">{topGoal.name}</p>
+              </div>
+            </Link>
+          ) : (
+            <Link
+              to="/goals"
+              className="grid place-items-center rounded-card border border-dashed border-border p-3.5 text-center text-xs text-muted"
+            >
+              + Add a savings goal
+            </Link>
+          )}
+        </div>
+      )}
 
       <section className="space-y-4">
         <div className="flex items-center justify-between">

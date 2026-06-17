@@ -5,6 +5,7 @@
 import { db, newId, now } from './db'
 import type { Account, Budget, Goal, Transaction } from './types'
 import { importHash, type ParsedRow } from '../lib/importing'
+import { buildBackup, isValidBackup, type BackupV1 } from '../lib/backup'
 
 // ---------------------------------------------------------------- accounts ---
 
@@ -347,6 +348,79 @@ export async function commitImport(
 /** Undo a whole import batch (incl. its reconciliation adjustment). */
 export async function undoImport(batchId: string): Promise<void> {
   await db.transactions.where('importBatchId').equals(batchId).delete()
+}
+
+// ------------------------------------------------------------------ backup ---
+
+/** Snapshot every table into a portable backup object. */
+export async function exportData(): Promise<BackupV1> {
+  const [accounts, transactions, categories, budgets, goals, settings] = await Promise.all([
+    db.accounts.toArray(),
+    db.transactions.toArray(),
+    db.categories.toArray(),
+    db.budgets.toArray(),
+    db.goals.toArray(),
+    db.settings.toArray(),
+  ])
+  return buildBackup(
+    { accounts, transactions, categories, budgets, goals, settings },
+    now(),
+  )
+}
+
+/** Replace ALL data with a validated backup (used by Import backup / restore). */
+export async function importData(backup: unknown): Promise<void> {
+  if (!isValidBackup(backup)) throw new Error('Not a valid Pera backup file.')
+  await db.transaction(
+    'rw',
+    [db.accounts, db.transactions, db.categories, db.budgets, db.goals, db.settings],
+    async () => {
+      await Promise.all([
+        db.accounts.clear(),
+        db.transactions.clear(),
+        db.categories.clear(),
+        db.budgets.clear(),
+        db.goals.clear(),
+        db.settings.clear(),
+      ])
+      await Promise.all([
+        db.accounts.bulkAdd(backup.accounts),
+        db.transactions.bulkAdd(backup.transactions),
+        db.categories.bulkAdd(backup.categories),
+        db.budgets.bulkAdd(backup.budgets),
+        db.goals.bulkAdd(backup.goals),
+        db.settings.bulkAdd(backup.settings),
+      ])
+    },
+  )
+}
+
+/** Wipe all data (accounts, transactions, budgets, goals, categories, settings). */
+export async function clearAllData(): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.accounts, db.transactions, db.categories, db.budgets, db.goals, db.settings],
+    async () => {
+      await Promise.all([
+        db.accounts.clear(),
+        db.transactions.clear(),
+        db.categories.clear(),
+        db.budgets.clear(),
+        db.goals.clear(),
+        db.settings.clear(),
+      ])
+    },
+  )
+}
+
+/** Stamp the last-backup time on the settings singleton. */
+export async function markBackedUp(): Promise<void> {
+  await db.settings.update('singleton', { lastBackupAt: now() })
+}
+
+/** Persist the chosen theme into settings (UI also keeps a localStorage copy). */
+export async function setThemePref(theme: 'system' | 'light' | 'dark'): Promise<void> {
+  await db.settings.update('singleton', { theme })
 }
 
 /**

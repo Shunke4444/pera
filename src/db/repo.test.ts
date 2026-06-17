@@ -11,7 +11,11 @@ import {
   bulkRecategorize,
   commitImport,
   undoImport,
+  exportData,
+  importData,
+  clearAllData,
 } from './repo'
+import { seedIfEmpty } from './seed'
 import { accountBalance, netWorth } from '../lib/balances'
 import type { ParsedRow } from '../lib/importing'
 
@@ -136,5 +140,34 @@ describe('commitImport / undoImport', () => {
     expect(await db.transactions.where('accountId').equals(a).count()).toBe(3) // 2 rows + adjust
     await undoImport(res.batchId)
     expect(await db.transactions.where('accountId').equals(a).count()).toBe(0)
+  })
+})
+
+describe('backup export / import round-trip', () => {
+  it('export -> clear -> import restores everything exactly', async () => {
+    await seedIfEmpty()
+    const { a } = await twoAccounts()
+    await addTransaction({ accountId: a, amount: -1500, type: 'expense', date: Date.now() })
+    await addTransfer({ fromAccountId: a, toAccountId: a, amount: 1, date: Date.now() }) // 2 legs
+
+    const before = await exportData()
+    const counts = {
+      accounts: before.accounts.length,
+      transactions: before.transactions.length,
+      categories: before.categories.length,
+    }
+
+    await clearAllData()
+    expect(await db.accounts.count()).toBe(0)
+    expect(await db.transactions.count()).toBe(0)
+
+    await importData(JSON.parse(JSON.stringify(before)))
+    expect(await db.accounts.count()).toBe(counts.accounts)
+    expect(await db.transactions.count()).toBe(counts.transactions)
+    expect(await db.categories.count()).toBe(counts.categories)
+  })
+
+  it('rejects a non-Pera file', async () => {
+    await expect(importData({ app: 'other' })).rejects.toThrow()
   })
 })

@@ -11,7 +11,7 @@ import {
   Settings as SettingsIcon,
   Plus,
 } from 'lucide-react'
-import { applyTheme, getInitialTheme, type Theme } from '../theme'
+import { applyTheme, getStoredTheme, resolveTheme, type Resolved } from '../theme'
 import AddTransactionSheet from '../components/AddTransactionSheet'
 
 const TABS = [
@@ -22,18 +22,18 @@ const TABS = [
 ] as const
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark')
+  const [theme, setTheme] = useState<Resolved>('dark')
   const [addOpen, setAddOpen] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
-    const t = getInitialTheme()
-    applyTheme(t)
-    setTheme(t)
+    const stored = getStoredTheme()
+    applyTheme(stored)
+    setTheme(resolveTheme(stored))
   }, [])
 
   const toggleTheme = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    const next: Resolved = theme === 'dark' ? 'light' : 'dark'
     applyTheme(next)
     setTheme(next)
   }

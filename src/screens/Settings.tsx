@@ -1,25 +1,122 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Archive, ArchiveRestore, Plus, Upload } from 'lucide-react'
-import { useAllAccounts, useTransactions } from '../hooks'
+import {
+  Pencil,
+  Archive,
+  ArchiveRestore,
+  Plus,
+  Upload,
+  Download,
+  FileJson,
+  FileSpreadsheet,
+  Trash2,
+  Smartphone,
+} from 'lucide-react'
+import { useAllAccounts, useTransactions, useCategories, useSettings } from '../hooks'
+import { useInstallPrompt } from '../hooks/useInstallPrompt'
 import { accountBalance } from '../lib/balances'
 import { formatPHP } from '../lib/money'
-import { archiveAccount } from '../db/repo'
+import {
+  archiveAccount,
+  exportData,
+  importData,
+  clearAllData,
+  markBackedUp,
+  setThemePref,
+} from '../db/repo'
+import { seedIfEmpty } from '../db/seed'
+import { transactionsToCSV, daysSinceBackup } from '../lib/backup'
+import { downloadText, readFileText, stampedName } from '../lib/download'
+import { applyTheme, getStoredTheme, type Theme } from '../theme'
 import type { Account } from '../db/types'
 import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
+import { Button } from '../ui/form'
 import { Dot, Eyebrow, SectionTitle } from '../ui/common'
 
 export default function Settings() {
   const accounts = useAllAccounts()
   const txns = useTransactions()
+  const categories = useCategories()
+  const settings = useSettings()
+  const { canInstall, promptInstall } = useInstallPrompt()
   const [editing, setEditing] = useState<Account | null>(null)
   const [adding, setAdding] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [theme, setThemeState] = useState<Theme>(getStoredTheme())
+
+  const exportJSON = async () => {
+    const data = await exportData()
+    downloadText(stampedName('pera-backup', 'json'), JSON.stringify(data, null, 2))
+    await markBackedUp()
+    setMsg('Backup downloaded.')
+  }
+
+  const exportCSV = async () => {
+    const csv = transactionsToCSV(txns, accounts, categories)
+    downloadText(stampedName('pera-transactions', 'csv'), csv, 'text/csv')
+    setMsg('CSV downloaded.')
+  }
+
+  const importJSON = async (file: File) => {
+    try {
+      const data = JSON.parse(await readFileText(file))
+      await importData(data)
+      setMsg('Backup restored.')
+    } catch {
+      setMsg('That file is not a valid Pera backup.')
+    }
+  }
+
+  const clearData = async () => {
+    if (!window.confirm('Erase ALL data on this device? This cannot be undone.')) return
+    await clearAllData()
+    await seedIfEmpty()
+    setMsg('All data cleared.')
+  }
+
+  const setTheme = (t: Theme) => {
+    applyTheme(t)
+    setThemeState(t)
+    void setThemePref(t)
+  }
+
+  const lastBackup = daysSinceBackup(settings?.lastBackupAt, Date.now())
 
   return (
     <div className="space-y-6">
       <SectionTitle>Settings</SectionTitle>
 
+      {canInstall && (
+        <button
+          onClick={promptInstall}
+          className="flex w-full items-center gap-3 rounded-card border border-accent/40 bg-surface px-3.5 py-3 text-sm font-medium"
+        >
+          <Smartphone size={16} className="text-accent" />
+          <span className="flex-1 text-left">Install Pera on this device</span>
+          <span className="text-accent">Install</span>
+        </button>
+      )}
+
+      {/* Theme */}
+      <section className="space-y-2">
+        <Eyebrow>Appearance</Eyebrow>
+        <div className="grid grid-cols-3 gap-2">
+          {(['light', 'dark', 'system'] as Theme[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTheme(t)}
+              className={`rounded-tile border px-3 py-2 text-sm font-semibold capitalize ${
+                theme === t ? 'border-accent text-accent' : 'border-border text-muted'
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Accounts */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <Eyebrow>Accounts</Eyebrow>
@@ -69,14 +166,52 @@ export default function Settings() {
         </div>
       </section>
 
+      {/* Backup */}
       <section className="space-y-2">
-        <Eyebrow>Data</Eyebrow>
+        <Eyebrow>Backup & data</Eyebrow>
+        <p className="text-xs text-muted">
+          {lastBackup === null
+            ? 'Not backed up yet — export a copy so clearing your browser can’t wipe it.'
+            : lastBackup === 0
+              ? 'Last backup: today.'
+              : `Last backup: ${lastBackup} day${lastBackup === 1 ? '' : 's'} ago.`}
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="ghost" onClick={exportJSON}>
+            <span className="inline-flex items-center gap-1.5">
+              <Download size={15} /> Export JSON
+            </span>
+          </Button>
+          <Button variant="ghost" onClick={exportCSV}>
+            <span className="inline-flex items-center gap-1.5">
+              <FileSpreadsheet size={15} /> Export CSV
+            </span>
+          </Button>
+        </div>
+        <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-tile border border-border bg-surface px-4 py-2.5 text-sm font-semibold hover:bg-surface-2">
+          <FileJson size={15} /> Restore from JSON backup
+          <input
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) importJSON(f)
+            }}
+          />
+        </label>
         <Link
           to="/import"
-          className="flex items-center gap-3 rounded-card border border-border bg-surface px-3.5 py-3 text-sm font-medium"
+          className="flex items-center gap-3 rounded-tile border border-border bg-surface px-3.5 py-2.5 text-sm font-medium"
         >
-          <Upload size={16} className="text-muted" /> Import statements
+          <Upload size={15} className="text-muted" /> Import bank statements
         </Link>
+        <Button variant="danger" className="w-full" onClick={clearData}>
+          <span className="inline-flex items-center gap-1.5">
+            <Trash2 size={15} /> Clear all data
+          </span>
+        </Button>
+        {msg && <p className="text-sm text-accent">{msg}</p>}
       </section>
 
       <section className="space-y-2">
