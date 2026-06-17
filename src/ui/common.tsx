@@ -42,3 +42,22 @@ export function EmptyState({
 export function Loading({ label = 'Loading…' }: { label?: string }) {
   return <p className="py-8 text-center text-sm text-muted">{label}</p>
 }
+
+const LEVEL_VAR: Record<string, string> = {
+  ok: 'var(--accent)',
+  warn: 'var(--warn)',
+  over: 'var(--neg)',
+}
+
+/** 8px budget track + fill, colored by level (ok/warn/over). */
+export function ProgressBar({ pct, level }: { pct: number; level: 'ok' | 'warn' | 'over' }) {
+  const width = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 100))
+  return (
+    <div className="h-2 w-full overflow-hidden rounded-pill bg-border">
+      <div
+        className="h-full rounded-pill transition-all"
+        style={{ width: `${width}%`, background: LEVEL_VAR[level] }}
+      />
+    </div>
+  )
+}

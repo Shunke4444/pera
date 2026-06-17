@@ -3,7 +3,7 @@
 // future native widget / share-intent can reuse the exact same entry points.
 
 import { db, newId, now } from './db'
-import type { Account, Transaction } from './types'
+import type { Account, Budget, Goal, Transaction } from './types'
 
 // ---------------------------------------------------------------- accounts ---
 
@@ -192,5 +192,99 @@ export async function bulkRecategorize(ids: string[], categoryId: string): Promi
     for (const id of ids) {
       await db.transactions.update(id, { categoryId, updatedAt: ts })
     }
+  })
+}
+
+// ----------------------------------------------------------------- budgets ---
+
+export async function addBudget(input: {
+  categoryId: string
+  amount: number
+  rollover?: boolean
+}): Promise<string> {
+  const id = newId()
+  const ts = now()
+  await db.budgets.add({
+    id,
+    categoryId: input.categoryId,
+    amount: input.amount,
+    period: 'monthly',
+    rollover: input.rollover,
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  return id
+}
+
+export async function updateBudget(
+  id: string,
+  patch: Partial<Omit<Budget, 'id' | 'createdAt'>>,
+): Promise<void> {
+  await db.budgets.update(id, { ...patch, updatedAt: now() })
+}
+
+export async function deleteBudget(id: string): Promise<void> {
+  await db.budgets.delete(id)
+}
+
+// ------------------------------------------------------------------- goals ---
+
+export async function addGoal(input: {
+  name: string
+  targetAmount: number
+  targetDate?: number
+  linkedAccountId?: string
+  color?: string
+}): Promise<string> {
+  const id = newId()
+  const ts = now()
+  await db.goals.add({
+    id,
+    name: input.name,
+    targetAmount: input.targetAmount,
+    targetDate: input.targetDate,
+    linkedAccountId: input.linkedAccountId,
+    color: input.color,
+    archived: false,
+    createdAt: ts,
+    updatedAt: ts,
+  })
+  return id
+}
+
+export async function updateGoal(
+  id: string,
+  patch: Partial<Omit<Goal, 'id' | 'createdAt'>>,
+): Promise<void> {
+  await db.goals.update(id, { ...patch, updatedAt: now() })
+}
+
+export async function archiveGoal(id: string, archived = true): Promise<void> {
+  await updateGoal(id, { archived })
+}
+
+export async function deleteGoal(id: string): Promise<void> {
+  await db.goals.delete(id)
+}
+
+/**
+ * Contribute to a (non-linked) goal: an income txn on `accountId` tagged with
+ * the goalId, which goalProgress sums. Linked-account goals track the account
+ * balance instead and don't need this.
+ */
+export async function contributeToGoal(input: {
+  goalId: string
+  accountId: string
+  amount: number
+  date: number
+  note?: string
+}): Promise<string> {
+  return addTransaction({
+    accountId: input.accountId,
+    amount: Math.abs(input.amount),
+    type: 'income',
+    goalId: input.goalId,
+    date: input.date,
+    note: input.note,
   })
 }
