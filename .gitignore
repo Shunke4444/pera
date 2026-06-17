@@ -5,3 +5,7 @@ dev-dist
 .DS_Store
 .env
 .vscode
+
+# Planning docs — local only, never commit
+_local/
+CLAUDE.md
