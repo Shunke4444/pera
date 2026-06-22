@@ -18,6 +18,9 @@ import {
   listGoals,
   archiveGoal,
   contributeToGoal,
+  addBudget,
+  addCategory,
+  deleteCategory,
 } from './repo'
 import { seedIfEmpty } from './seed'
 import { accountBalance, netWorth, goalProgress } from '../lib/balances'
@@ -230,6 +233,48 @@ describe('listGoals', () => {
     await archiveGoal(drop)
     const goals = await listGoals()
     expect(goals.map((g) => g.name)).toEqual(['Keep'])
+  })
+})
+
+describe('addCategory', () => {
+  it('creates a new category with an auto color and returns its id', async () => {
+    const id = await addCategory({ name: 'Pets', kind: 'expense' })
+    const cat = await db.categories.get(id)
+    expect(cat?.name).toBe('Pets')
+    expect(cat?.kind).toBe('expense')
+    expect(cat?.color).toBeTruthy()
+  })
+
+  it('reuses an existing category when the name matches (case-insensitive, same kind)', async () => {
+    await seedIfEmpty() // seeds "Food" / expense
+    const before = await db.categories.count()
+    const id = await addCategory({ name: 'food', kind: 'expense' })
+    expect(id).toBe('food')
+    expect(await db.categories.count()).toBe(before) // no duplicate row
+  })
+
+  it('treats the same name under a different kind as a separate category', async () => {
+    const expense = await addCategory({ name: 'Bonus', kind: 'expense' })
+    const income = await addCategory({ name: 'Bonus', kind: 'income' })
+    expect(income).not.toBe(expense)
+    expect(await db.categories.count()).toBe(2)
+  })
+})
+
+describe('deleteCategory', () => {
+  it('removes the category, clears it from txns, and drops its budget', async () => {
+    const { a } = await twoAccounts()
+    const catId = await addCategory({ name: 'Pets', kind: 'expense' })
+    const t1 = await addTransaction({
+      accountId: a, amount: -500, type: 'expense', categoryId: catId, date: Date.now(),
+    })
+    await addBudget({ categoryId: catId, amount: 100000 })
+
+    await deleteCategory(catId)
+
+    expect(await db.categories.get(catId)).toBeUndefined()
+    expect((await db.transactions.get(t1))?.categoryId).toBeUndefined()
+    expect(await db.budgets.where('categoryId').equals(catId).count()).toBe(0)
   })
 })
 

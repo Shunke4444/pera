@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   spendingByCategory,
+  budgetBreakdown,
   incomeExpenseByMonth,
   netWorthAt,
   netWorthSeries,
@@ -65,6 +66,33 @@ describe('spendingByCategory', () => {
     const uncat = slices.find((s) => s.categoryId === '__uncat__')
     expect(uncat?.name).toBe('Uncategorized')
     expect(uncat?.total).toBe(500)
+  })
+})
+
+describe('budgetBreakdown', () => {
+  const breakdownCats: Category[] = [
+    { id: 'food', name: 'Food', kind: 'expense', color: '#a' },
+    { id: 'bills', name: 'Bills', kind: 'expense', color: '#b' },
+    { id: 'rent', name: 'Rent', kind: 'expense', color: '#c' },
+  ]
+  const txns = [
+    tx({ categoryId: 'food', amount: -4000 }), // capped + spent
+    tx({ categoryId: 'bills', amount: -1000 }), // uncapped + spent
+    // rent: capped, NO spend this month
+    // fun: neither cap nor spend
+  ]
+  const budgets = [{ categoryId: 'food' }, { categoryId: 'rent' }]
+
+  it('includes capped-and-unspent categories (₱0), keeps uncapped-with-spend, drops neither', () => {
+    const rows = budgetBreakdown(txns, breakdownCats, budgets, '2026-06')
+    const byId = Object.fromEntries(rows.map((r) => [r.categoryId, r.total]))
+    expect(byId).toEqual({ food: 4000, bills: 1000, rent: 0 })
+    expect(rows.some((r) => r.categoryId === 'fun')).toBe(false)
+  })
+
+  it('sorts biggest-spend-first, with unspent caps last', () => {
+    const rows = budgetBreakdown(txns, breakdownCats, budgets, '2026-06')
+    expect(rows.map((r) => r.categoryId)).toEqual(['food', 'bills', 'rent'])
   })
 })
 

@@ -31,6 +31,7 @@ import { applyTheme, getStoredTheme, type Theme } from '../theme'
 import type { Account } from '../db/types'
 import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
+import CategoryManager from '../components/CategoryManager'
 import { Button } from '../ui/form'
 import { Dot, Eyebrow, SectionTitle } from '../ui/common'
 
@@ -42,6 +43,7 @@ export default function Settings() {
   const { canInstall, promptInstall } = useInstallPrompt()
   const [editing, setEditing] = useState<Account | null>(null)
   const [adding, setAdding] = useState(false)
+  const [managingCats, setManagingCats] = useState(false)
   const [msg, setMsg] = useState('')
   const [theme, setThemeState] = useState<Theme>(getStoredTheme())
 
@@ -167,6 +169,18 @@ export default function Settings() {
         </div>
       </section>
 
+      {/* Categories */}
+      <section className="space-y-2">
+        <Eyebrow>Categories</Eyebrow>
+        <button
+          onClick={() => setManagingCats(true)}
+          className="flex w-full items-center justify-between rounded-card border border-border bg-surface px-3.5 py-3 text-sm font-medium"
+        >
+          <span>Manage categories</span>
+          <span className="text-xs text-dim">{categories.length}</span>
+        </button>
+      </section>
+
       {/* Backup */}
       <section className="space-y-2">
         <Eyebrow>Backup & data</Eyebrow>
@@ -230,6 +244,9 @@ export default function Settings() {
       </Modal>
       <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit account">
         {editing && <AccountForm account={editing} onDone={() => setEditing(null)} />}
+      </Modal>
+      <Modal open={managingCats} onClose={() => setManagingCats(false)} title="Manage categories">
+        <CategoryManager />
       </Modal>
     </div>
   )

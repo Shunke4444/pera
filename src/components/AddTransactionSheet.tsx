@@ -9,6 +9,7 @@ import {
   updateTransaction,
   updateTransfer,
   deleteTransaction,
+  addCategory,
 } from '../db/repo'
 import { parseMajorInput, fromMinor } from '../lib/money'
 import { toDateInput, fromDateInput } from '../lib/dates'
@@ -35,7 +36,7 @@ export default function AddTransactionSheet({
   const [amount, setAmount] = useState('')
   const [accountId, setAccountId] = useState('')
   const [toAccountId, setToAccountId] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+  const [categoryName, setCategoryName] = useState('')
   const [date, setDate] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
   const [err, setErr] = useState('')
@@ -54,7 +55,7 @@ export default function AddTransactionSheet({
       setAmount(String(Math.abs(fromMinor(editTxn.amount))))
       setDate(toDateInput(editTxn.date))
       setNote(editTxn.note ?? '')
-      setCategoryId(editTxn.categoryId ?? '')
+      setCategoryName(categories.find((c) => c.id === editTxn.categoryId)?.name ?? '')
       if (editTxn.type === 'transfer') {
         if (editTxn.amount < 0) {
           setAccountId(editTxn.accountId)
@@ -69,7 +70,7 @@ export default function AddTransactionSheet({
     } else {
       setMode('expense')
       setAmount('')
-      setCategoryId('')
+      setCategoryName('')
       setNote('')
       setDate(toDateInput(Date.now()))
       setAccountId(defaultAccountId ?? accounts[0]?.id ?? '')
@@ -125,12 +126,19 @@ export default function AddTransactionSheet({
       }
 
       const signed = mode === 'expense' ? -minor : minor
+      // Resolve the typed category name to an id, creating it on the fly when
+      // it's new (addCategory dedups by name+kind, so an existing name reuses
+      // its category). Empty name → uncategorized.
+      const name = categoryName.trim()
+      const categoryId = name
+        ? await addCategory({ name, kind: mode === 'income' ? 'income' : 'expense' })
+        : undefined
       if (editing) {
         await updateTransaction(editTxn!.id, {
           amount: signed,
           type: mode,
           accountId,
-          categoryId: categoryId || undefined,
+          categoryId,
           date: ms,
           note: note.trim() || undefined,
         })
@@ -139,7 +147,7 @@ export default function AddTransactionSheet({
           accountId,
           amount: signed,
           type: mode,
-          categoryId: categoryId || undefined,
+          categoryId,
           date: ms,
           note: note.trim() || undefined,
         })
@@ -190,7 +198,7 @@ export default function AddTransactionSheet({
                   type="button"
                   onClick={() => {
                     setMode(m)
-                    setCategoryId('')
+                    setCategoryName('')
                   }}
                   className={`rounded-tile border px-2 py-2 text-sm font-semibold capitalize ${
                     mode === m
@@ -255,14 +263,18 @@ export default function AddTransactionSheet({
 
           {(mode === 'expense' || mode === 'income') && (
             <Field label="Category">
-              <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                <option value="">— Uncategorized —</option>
+              <Input
+                list="txn-category-options"
+                value={categoryName}
+                onChange={(e) => setCategoryName(e.target.value)}
+                placeholder="Pick one or type a new name"
+                autoComplete="off"
+              />
+              <datalist id="txn-category-options">
                 {cats.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
+                  <option key={c.id} value={c.name} />
                 ))}
-              </Select>
+              </datalist>
             </Field>
           )}
 

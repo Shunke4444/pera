@@ -33,3 +33,15 @@ export function budgetStatus(amount: number, spent: number, carry = 0): BudgetSt
   const pct = limit > 0 ? (spent / limit) * 100 : spent > 0 ? Infinity : 0
   return { limit, spent, remaining, pct, level: budgetLevel(pct) }
 }
+
+/**
+ * Linear month-end forecast: project the current spend pace across the whole
+ * month (spent ÷ days-elapsed × days-in-month). `now` is epoch ms; the day of
+ * the month is "days elapsed". Returns whole minor units.
+ */
+export function projectedMonthEnd(spent: number, now: number): number {
+  const d = new Date(now)
+  const daysElapsed = d.getDate()
+  const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+  return Math.round((spent / daysElapsed) * daysInMonth)
+}

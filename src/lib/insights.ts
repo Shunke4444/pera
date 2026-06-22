@@ -1,7 +1,7 @@
 // Pure aggregations behind the Insights charts. Each returns plain numbers in
 // minor units so a chart and a hand check read the same value.
 
-import type { Account, Category, Transaction } from '../db/types'
+import type { Account, Budget, Category, Transaction } from '../db/types'
 import { accountBalance, monthKey } from './balances'
 import { monthEndMs } from './dates'
 
@@ -37,6 +37,30 @@ export function spendingByCategory(
       color: cat?.color ?? '#9AA0AA',
       total,
     })
+  }
+  return slices.sort((a, b) => b.total - a.total)
+}
+
+/**
+ * Rows for the Budgets "where it's going" breakdown: a category appears if it
+ * has spend this month OR a per-category cap. Capped categories always render
+ * (total 0 when unspent, so the cap bar still shows); uncapped ones only when
+ * they have spend. Sorted biggest-spend-first, so unspent caps sit at the end.
+ */
+export function budgetBreakdown(
+  txns: Transaction[],
+  categories: Category[],
+  budgets: Pick<Budget, 'categoryId'>[],
+  month: string,
+): CategorySlice[] {
+  const slices = spendingByCategory(txns, categories, month)
+  const present = new Set(slices.map((s) => s.categoryId))
+  for (const b of budgets) {
+    if (present.has(b.categoryId)) continue
+    present.add(b.categoryId)
+    const cat = categories.find((c) => c.id === b.categoryId)
+    if (!cat) continue // dangling cap (deleteCategory cascades, so unexpected)
+    slices.push({ categoryId: cat.id, name: cat.name, color: cat.color, total: 0 })
   }
   return slices.sort((a, b) => b.total - a.total)
 }

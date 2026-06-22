@@ -5,6 +5,7 @@ import {
   netWorth,
   assetsLiabilities,
   budgetSpent,
+  overallSpent,
   goalProgress,
   monthKey,
 } from './balances'
@@ -135,6 +136,33 @@ describe('budgetSpent', () => {
 
   it('is zero when nothing matches', () => {
     expect(budgetSpent(budget, [], '2026-06')).toBe(0)
+  })
+})
+
+describe('overallSpent', () => {
+  it('sums absolute expense amounts across every category in the given month', () => {
+    const txns = [
+      tx({ accountId: 'gcash', amount: -1500, type: 'expense', categoryId: 'food' }),
+      tx({ accountId: 'gcash', amount: -2500, type: 'expense', categoryId: 'transport' }),
+      tx({ accountId: 'gcash', amount: -1000, type: 'expense' }), // uncategorized still counts
+    ]
+    expect(overallSpent(txns, '2026-06')).toBe(5000)
+  })
+
+  it('excludes income, transfer, adjustment, goal and other months', () => {
+    const txns = [
+      tx({ accountId: 'gcash', amount: -1000, type: 'expense', categoryId: 'food' }), // counts
+      tx({ accountId: 'gcash', amount: -8888, type: 'expense', date: new Date(2026, 4, 30).getTime() }), // May
+      tx({ accountId: 'gcash', amount: 5000, type: 'income' }), // income
+      tx({ accountId: 'gcash', amount: -3000, type: 'transfer' }), // transfer
+      tx({ accountId: 'gcash', amount: -3000, type: 'adjustment' }), // adjustment
+      tx({ accountId: 'gcash', amount: 4000, type: 'goal', goalId: 'g1' }), // goal earmark
+    ]
+    expect(overallSpent(txns, '2026-06')).toBe(1000)
+  })
+
+  it('is zero when nothing matches', () => {
+    expect(overallSpent([], '2026-06')).toBe(0)
   })
 })
 

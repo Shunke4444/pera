@@ -87,4 +87,5 @@ export interface Settings {
   baseCurrency: string
   theme: 'system' | 'light' | 'dark'
   lastBackupAt?: number
+  monthlyBudget?: number // overall cap on total monthly spend, minor units; undefined = not set
 }

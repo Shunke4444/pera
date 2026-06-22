@@ -80,6 +80,21 @@ export function budgetSpent(
 }
 
 /**
+ * Σ |amount| of ALL expense txns in the given month ("YYYY-MM") — the headline
+ * monthly-budget total. Uncategorized expenses count too; income, transfers,
+ * adjustments and goal earmarks are excluded by the type filter.
+ */
+export function overallSpent(txns: Transaction[], month: string): number {
+  let spent = 0
+  for (const t of txns) {
+    if (t.type === 'expense' && monthKey(t.date) === month) {
+      spent += Math.abs(t.amount)
+    }
+  }
+  return spent
+}
+
+/**
  * Saved-so-far for a goal. If the goal is linked to an account, that account's
  * balance is the progress; otherwise Σ amounts of txns tagged with goalId.
  */
