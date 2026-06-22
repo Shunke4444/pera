@@ -14,3 +14,6 @@ vite.config.d.ts
 # Planning docs — local only, never commit
 _local/
 CLAUDE.md
+
+# Playwright MCP scratch output
+.playwright-mcp/

@@ -44,26 +44,30 @@ export default function AccountForm({
       setErr('Opening balance is not a valid amount.')
       return
     }
-    if (editing) {
-      await updateAccount(account!.id, {
-        name: name.trim(),
-        bank: bank.trim() || name.trim(),
-        type,
-        openingBalance,
-        isIncomeSource: isIncome,
-        color,
-      })
-    } else {
-      await addAccount({
-        name: name.trim(),
-        bank: bank.trim() || name.trim(),
-        type,
-        openingBalance,
-        isIncomeSource: isIncome,
-        color,
-      })
+    try {
+      if (editing) {
+        await updateAccount(account!.id, {
+          name: name.trim(),
+          bank: bank.trim() || name.trim(),
+          type,
+          openingBalance,
+          isIncomeSource: isIncome,
+          color,
+        })
+      } else {
+        await addAccount({
+          name: name.trim(),
+          bank: bank.trim() || name.trim(),
+          type,
+          openingBalance,
+          isIncomeSource: isIncome,
+          color,
+        })
+      }
+      onDone()
+    } catch (e) {
+      setErr(`Couldn't save — ${e instanceof Error ? e.message : 'please try again.'}`)
     }
-    onDone()
   }
 
   return (

@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
+import { listGoals } from '../db/repo'
 import type { Account, Transaction, Category, Budget, Goal, Settings } from '../db/types'
 import {
   netWorth,
@@ -63,12 +64,7 @@ export function useBudgets(): Budget[] {
 }
 
 export function useGoals(): Goal[] {
-  return (
-    useLiveQuery(async () => {
-      const rows = await db.goals.toArray()
-      return rows.filter((g) => !g.archived).sort((a, b) => a.createdAt - b.createdAt)
-    }, []) ?? []
-  )
+  return useLiveQuery(() => listGoals(), []) ?? []
 }
 
 export function useSettings(): Settings | undefined {

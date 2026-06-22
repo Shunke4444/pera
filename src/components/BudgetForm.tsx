@@ -29,12 +29,16 @@ export default function BudgetForm({
     const minor = parseMajorInput(amount)
     if (minor === null || minor <= 0) return setErr('Enter a monthly limit.')
     if (!categoryId) return setErr('Pick a category.')
-    if (editing) {
-      await updateBudget(budget!.id, { amount: minor, rollover })
-    } else {
-      await addBudget({ categoryId, amount: minor, rollover })
+    try {
+      if (editing) {
+        await updateBudget(budget!.id, { amount: minor, rollover })
+      } else {
+        await addBudget({ categoryId, amount: minor, rollover })
+      }
+      onDone()
+    } catch (e) {
+      setErr(`Couldn't save — ${e instanceof Error ? e.message : 'please try again.'}`)
     }
-    onDone()
   }
 
   return (

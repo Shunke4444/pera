@@ -93,53 +93,62 @@ export default function AddTransactionSheet({
     }
     const ms = fromDateInput(date)
 
-    if (mode === 'transfer') {
-      if (!accountId || !toAccountId) return setErr('Pick both accounts.')
-      if (accountId === toAccountId) return setErr('Transfer needs two different accounts.')
-      if (editing && editTxn?.transferGroupId) {
-        await updateTransfer(editTxn.transferGroupId, { amount: minor, date: ms, note })
+    try {
+      if (mode === 'transfer') {
+        if (!accountId || !toAccountId) return setErr('Pick both accounts.')
+        if (accountId === toAccountId) return setErr('Transfer needs two different accounts.')
+        if (editing && editTxn?.transferGroupId) {
+          await updateTransfer(editTxn.transferGroupId, { amount: minor, date: ms, note })
+        } else {
+          await addTransfer({
+            fromAccountId: accountId,
+            toAccountId,
+            amount: minor,
+            date: ms,
+            note: note.trim() || undefined,
+          })
+        }
+        return close()
+      }
+
+      if (!accountId) return setErr('Pick an account.')
+
+      if (mode === 'adjustment') {
+        // Editing an existing adjustment only — keep its sign.
+        const signed = editTxn && editTxn.amount < 0 ? -minor : minor
+        await updateTransaction(editTxn!.id, {
+          amount: signed,
+          date: ms,
+          note: note.trim() || undefined,
+        })
+        return close()
+      }
+
+      const signed = mode === 'expense' ? -minor : minor
+      if (editing) {
+        await updateTransaction(editTxn!.id, {
+          amount: signed,
+          type: mode,
+          accountId,
+          categoryId: categoryId || undefined,
+          date: ms,
+          note: note.trim() || undefined,
+        })
       } else {
-        await addTransfer({
-          fromAccountId: accountId,
-          toAccountId,
-          amount: minor,
+        await addTransaction({
+          accountId,
+          amount: signed,
+          type: mode,
+          categoryId: categoryId || undefined,
           date: ms,
           note: note.trim() || undefined,
         })
       }
-      return close()
+      close()
+    } catch (e) {
+      // Don't swallow a write failure or close the sheet — show it inline.
+      setErr(`Couldn't save — ${e instanceof Error ? e.message : 'please try again.'}`)
     }
-
-    if (!accountId) return setErr('Pick an account.')
-
-    if (mode === 'adjustment') {
-      // Editing an existing adjustment only — keep its sign.
-      const signed = editTxn && editTxn.amount < 0 ? -minor : minor
-      await updateTransaction(editTxn!.id, { amount: signed, date: ms, note: note.trim() || undefined })
-      return close()
-    }
-
-    const signed = mode === 'expense' ? -minor : minor
-    if (editing) {
-      await updateTransaction(editTxn!.id, {
-        amount: signed,
-        type: mode,
-        accountId,
-        categoryId: categoryId || undefined,
-        date: ms,
-        note: note.trim() || undefined,
-      })
-    } else {
-      await addTransaction({
-        accountId,
-        amount: signed,
-        type: mode,
-        categoryId: categoryId || undefined,
-        date: ms,
-        note: note.trim() || undefined,
-      })
-    }
-    close()
   }
 
   const remove = async () => {

@@ -265,6 +265,16 @@ export async function archiveGoal(id: string, archived = true): Promise<void> {
   await updateGoal(id, { archived })
 }
 
+/**
+ * Canonical goal list: every non-archived goal, oldest first (creation order).
+ * Shared by `useGoals` and tested directly so the whole list — not just the
+ * first goal — is guaranteed to load.
+ */
+export async function listGoals(): Promise<Goal[]> {
+  const rows = await db.goals.toArray()
+  return rows.filter((g) => !g.archived).sort((a, b) => a.createdAt - b.createdAt)
+}
+
 export async function deleteGoal(id: string): Promise<void> {
   await db.goals.delete(id)
 }

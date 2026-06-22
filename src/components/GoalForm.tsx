@@ -36,9 +36,15 @@ export default function GoalForm({
       linkedAccountId: linkedAccountId || undefined,
       color,
     }
-    if (editing) await updateGoal(goal!.id, payload)
-    else await addGoal(payload)
-    onDone()
+    try {
+      if (editing) await updateGoal(goal!.id, payload)
+      else await addGoal(payload)
+      onDone()
+    } catch (e) {
+      // Surface write failures (e.g. storage blocked / quota) instead of
+      // silently closing — the modal stays open so nothing is lost.
+      setErr(`Couldn't save — ${e instanceof Error ? e.message : 'please try again.'}`)
+    }
   }
 
   return (

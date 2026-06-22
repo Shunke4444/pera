@@ -15,6 +15,8 @@ import {
   importData,
   clearAllData,
   addGoal,
+  listGoals,
+  archiveGoal,
   contributeToGoal,
 } from './repo'
 import { seedIfEmpty } from './seed'
@@ -188,6 +190,46 @@ describe('contributeToGoal', () => {
     const goal = (await db.goals.get(goalId))!
     expect(goalProgress(goal, txns, accounts)).toBe(4000)
     expect(accountBalance(accounts.find((x) => x.id === a)!, txns)).toBe(6000)
+  })
+})
+
+describe('listGoals', () => {
+  // Regression: adding a 2nd goal used to "not load" because the dashboard only
+  // read goals[0]. The data layer must return EVERY non-archived goal, in
+  // creation order, and progress must resolve for each one independently.
+  it('returns every non-archived goal in creation order, each resolving progress', async () => {
+    const { a } = await twoAccounts()
+    const g1 = await addGoal({ name: 'Japan trip', targetAmount: 100000 })
+    const g2 = await addGoal({ name: 'Emergency fund', targetAmount: 200000 })
+
+    await contributeToGoal({ goalId: g1, accountId: a, amount: 5000, date: Date.now() })
+    await contributeToGoal({ goalId: g2, accountId: a, amount: 7000, date: Date.now() })
+
+    const goals = await listGoals()
+    expect(goals).toHaveLength(2)
+    const names = goals.map((g) => g.name)
+    expect(names).toContain('Japan trip')
+    expect(names).toContain('Emergency fund')
+
+    // oldest first (createdAt non-decreasing)
+    for (let i = 1; i < goals.length; i++) {
+      expect(goals[i].createdAt).toBeGreaterThanOrEqual(goals[i - 1].createdAt)
+    }
+
+    // every goal resolves its own progress (not just the first)
+    const txns = await db.transactions.toArray()
+    const accounts = await db.accounts.toArray()
+    const byName = (n: string) => goals.find((g) => g.name === n)!
+    expect(goalProgress(byName('Japan trip'), txns, accounts)).toBe(5000)
+    expect(goalProgress(byName('Emergency fund'), txns, accounts)).toBe(7000)
+  })
+
+  it('omits archived goals', async () => {
+    await addGoal({ name: 'Keep', targetAmount: 1000 })
+    const drop = await addGoal({ name: 'Drop', targetAmount: 1000 })
+    await archiveGoal(drop)
+    const goals = await listGoals()
+    expect(goals.map((g) => g.name)).toEqual(['Keep'])
   })
 })
 
