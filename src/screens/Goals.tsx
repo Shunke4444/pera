@@ -92,7 +92,7 @@ export default function Goals() {
                     </p>
                   </div>
                 </div>
-                {!linked && !stats.complete && (
+                {!stats.complete && (
                   <Button
                     variant="ghost"
                     className="mt-3 w-full"
@@ -126,14 +126,23 @@ function ContributeModal({ goal, onClose }: { goal: Goal | null; onClose: () => 
   const [date, setDate] = useState(toDateInput(Date.now()))
   const [err, setErr] = useState('')
 
+  // A linked goal is funded by a real transfer, so it can't draw from its own
+  // backing account — drop it from the "from" list.
+  const linkedId = goal?.linkedAccountId
+  const linkedName = linkedId ? accounts.find((a) => a.id === linkedId)?.name : undefined
+  const fromAccounts = linkedId ? accounts.filter((a) => a.id !== linkedId) : accounts
+  const resolvedFrom =
+    accountId && fromAccounts.some((a) => a.id === accountId)
+      ? accountId
+      : fromAccounts[0]?.id ?? ''
+
   const submit = async () => {
     const minor = parseMajorInput(amount)
     if (minor === null || minor <= 0) return setErr('Enter an amount.')
-    const acct = accountId || accounts[0]?.id
-    if (!acct) return setErr('Add an account first.')
+    if (!resolvedFrom) return setErr('Add another account to contribute from.')
     await contributeToGoal({
       goalId: goal!.id,
-      accountId: acct,
+      accountId: resolvedFrom,
       amount: minor,
       date: fromDateInput(date),
       note: `Contribution to ${goal!.name}`,
@@ -156,8 +165,8 @@ function ContributeModal({ goal, onClose }: { goal: Goal | null; onClose: () => 
           />
         </Field>
         <Field label="From account">
-          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-            {accounts.map((a) => (
+          <Select value={resolvedFrom} onChange={(e) => setAccountId(e.target.value)}>
+            {fromAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
               </option>
@@ -167,6 +176,11 @@ function ContributeModal({ goal, onClose }: { goal: Goal | null; onClose: () => 
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
+        <p className="text-xs text-muted">
+          {linkedName
+            ? `Moves money into ${linkedName}. Net worth stays the same.`
+            : 'Earmarks money toward this goal. It stays in your account and doesn’t count as income.'}
+        </p>
         {err && <p className="text-sm text-neg">{err}</p>}
         <Button onClick={submit} className="w-full">
           Add contribution

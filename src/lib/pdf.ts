@@ -4,16 +4,9 @@
 
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { PdfPasswordError } from './pdfError'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
-
-/** Thrown when a PDF needs a password (or the supplied one is wrong). */
-export class PdfPasswordError extends Error {
-  constructor(public needsPassword: boolean) {
-    super('PDF is password protected')
-    this.name = 'PdfPasswordError'
-  }
-}
 
 export async function pdfToLines(file: File, password?: string): Promise<string[]> {
   const data = new Uint8Array(await file.arrayBuffer())

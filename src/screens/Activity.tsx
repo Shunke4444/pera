@@ -9,7 +9,7 @@ import AddTransactionSheet from '../components/AddTransactionSheet'
 import { Input, Select, Button } from '../ui/form'
 import { SectionTitle } from '../ui/common'
 
-const TYPES: TransactionType[] = ['income', 'expense', 'transfer', 'adjustment']
+const TYPES: TransactionType[] = ['income', 'expense', 'transfer', 'adjustment', 'goal']
 
 export default function Activity() {
   const accounts = useAccounts()

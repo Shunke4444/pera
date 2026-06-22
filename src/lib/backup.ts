@@ -37,13 +37,25 @@ export function buildBackup(tables: BackupTables, exportedAt: number): BackupV1 
   return { app: 'pera', version: 1, exportedAt, ...tables }
 }
 
-/** Structural validation so a bad/foreign file can't corrupt the DB on import. */
+/** A row is restorable only if it's an object carrying a non-empty string id. */
+function isRow(r: unknown): boolean {
+  if (!r || typeof r !== 'object') return false
+  const id = (r as { id?: unknown }).id
+  return typeof id === 'string' && id !== ''
+}
+
+/**
+ * Structural + row-level validation so a bad/foreign file can't corrupt the DB
+ * on import. Checking every row has a usable id BEFORE we touch the DB means a
+ * malformed-but-plausible backup is rejected up front rather than failing
+ * mid-restore (where it could leave the DB half-written).
+ */
 export function isValidBackup(obj: unknown): obj is BackupV1 {
   if (!obj || typeof obj !== 'object') return false
   const b = obj as Record<string, unknown>
   if (b.app !== 'pera' || b.version !== 1) return false
   const arrays = ['accounts', 'transactions', 'categories', 'budgets', 'goals', 'settings']
-  return arrays.every((k) => Array.isArray(b[k]))
+  return arrays.every((k) => Array.isArray(b[k]) && (b[k] as unknown[]).every(isRow))
 }
 
 function csvCell(v: string | number): string {

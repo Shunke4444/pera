@@ -10,14 +10,20 @@ export function monthKey(date: number): string {
   return `${d.getFullYear()}-${month}`
 }
 
-/** openingBalance + Σ amounts of txns belonging to this account. */
+/**
+ * openingBalance + Σ amounts of txns belonging to this account. `goal` earmarks
+ * are virtual (they tag existing money toward a goal, they don't move it) so
+ * they never affect a real balance — and through this, never net worth either.
+ */
 export function accountBalance(
   account: Pick<Account, 'id' | 'openingBalance'>,
   txns: Transaction[],
 ): number {
   let sum = account.openingBalance
   for (const t of txns) {
-    if (t.accountId === account.id) sum += t.amount
+    if (t.accountId !== account.id) continue
+    if (t.type === 'goal') continue
+    sum += t.amount
   }
   return sum
 }

@@ -9,7 +9,12 @@ export type AccountType =
   | 'cash'
   | 'investment'
 
-export type TransactionType = 'income' | 'expense' | 'transfer' | 'adjustment'
+export type TransactionType =
+  | 'income'
+  | 'expense'
+  | 'transfer'
+  | 'adjustment'
+  | 'goal' // virtual-goal earmark: tracked for goal progress, excluded from all money math
 
 export type CategoryKind = 'income' | 'expense'
 

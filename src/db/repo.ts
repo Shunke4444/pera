@@ -368,9 +368,18 @@ export async function exportData(): Promise<BackupV1> {
   )
 }
 
-/** Replace ALL data with a validated backup (used by Import backup / restore). */
+/**
+ * Replace ALL data with a validated backup (used by Import backup / restore).
+ *
+ * Restore is the recovery path, so a bad file must never empty the DB:
+ *  1. `isValidBackup` validates every row (incl. non-empty ids) BEFORE we touch
+ *     the DB — a malformed-but-plausible file is rejected with no mutation.
+ *  2. The clear + bulkAdd run in ONE `rw` transaction, so if any insert still
+ *     throws the whole thing rolls back and the existing data is left intact.
+ */
 export async function importData(backup: unknown): Promise<void> {
   if (!isValidBackup(backup)) throw new Error('Not a valid Pera backup file.')
+  const { accounts, transactions, categories, budgets, goals, settings } = backup
   await db.transaction(
     'rw',
     [db.accounts, db.transactions, db.categories, db.budgets, db.goals, db.settings],
@@ -384,12 +393,12 @@ export async function importData(backup: unknown): Promise<void> {
         db.settings.clear(),
       ])
       await Promise.all([
-        db.accounts.bulkAdd(backup.accounts),
-        db.transactions.bulkAdd(backup.transactions),
-        db.categories.bulkAdd(backup.categories),
-        db.budgets.bulkAdd(backup.budgets),
-        db.goals.bulkAdd(backup.goals),
-        db.settings.bulkAdd(backup.settings),
+        db.accounts.bulkAdd(accounts),
+        db.transactions.bulkAdd(transactions),
+        db.categories.bulkAdd(categories),
+        db.budgets.bulkAdd(budgets),
+        db.goals.bulkAdd(goals),
+        db.settings.bulkAdd(settings),
       ])
     },
   )
@@ -424,9 +433,15 @@ export async function setThemePref(theme: 'system' | 'light' | 'dark'): Promise<
 }
 
 /**
- * Contribute to a (non-linked) goal: an income txn on `accountId` tagged with
- * the goalId, which goalProgress sums. Linked-account goals track the account
- * balance instead and don't need this.
+ * Contribute to a goal — without ever fabricating money (a contribution
+ * earmarks money you already have, it isn't income).
+ *
+ * - **Linked goal** (backed by a real account): a real **transfer** of
+ *   `amount` from `accountId` into the goal's linked account. Progress is that
+ *   account's balance; the transfer nets to zero, so net worth is unchanged.
+ * - **Virtual goal** (no linked account): a neutral `goal` earmark txn tagged
+ *   with the goalId. `goalProgress` sums it, but it is excluded from every
+ *   balance / net-worth / income / expense calculation.
  */
 export async function contributeToGoal(input: {
   goalId: string
@@ -435,10 +450,23 @@ export async function contributeToGoal(input: {
   date: number
   note?: string
 }): Promise<string> {
+  const mag = Math.abs(input.amount)
+  const goal = await db.goals.get(input.goalId)
+
+  if (goal?.linkedAccountId && goal.linkedAccountId !== input.accountId) {
+    return addTransfer({
+      fromAccountId: input.accountId,
+      toAccountId: goal.linkedAccountId,
+      amount: mag,
+      date: input.date,
+      note: input.note,
+    })
+  }
+
   return addTransaction({
     accountId: input.accountId,
-    amount: Math.abs(input.amount),
-    type: 'income',
+    amount: mag,
+    type: 'goal',
     goalId: input.goalId,
     date: input.date,
     note: input.note,

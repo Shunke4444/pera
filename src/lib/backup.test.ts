@@ -38,6 +38,22 @@ describe('buildBackup / isValidBackup', () => {
     const b = buildBackup(empty, 1)
     expect(isValidBackup(JSON.parse(JSON.stringify(b)))).toBe(true)
   })
+
+  it('rejects a backup whose rows are missing or have an empty id', () => {
+    const base = buildBackup(empty, 1)
+    expect(isValidBackup({ ...base, accounts: [{ name: 'GCash' }] })).toBe(false)
+    expect(isValidBackup({ ...base, transactions: [{ amount: 100 }] })).toBe(false)
+    expect(isValidBackup({ ...base, goals: [{ id: '' }] })).toBe(false)
+    expect(isValidBackup({ ...base, categories: [null] })).toBe(false)
+  })
+
+  it('accepts a backup whose every row carries a non-empty id', () => {
+    const b = buildBackup(
+      { ...empty, accounts: [{ id: 'a1', name: 'GCash' } as Account] },
+      1,
+    )
+    expect(isValidBackup(b)).toBe(true)
+  })
 })
 
 describe('transactionsToCSV', () => {

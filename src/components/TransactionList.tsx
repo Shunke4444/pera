@@ -12,7 +12,7 @@ function dayLabel(ms: number): string {
 }
 
 function amountClass(t: Transaction): string {
-  if (t.type === 'transfer' || t.type === 'adjustment') return 'text-muted'
+  if (t.type === 'transfer' || t.type === 'adjustment' || t.type === 'goal') return 'text-muted'
   return t.amount >= 0 ? 'text-pos' : 'text-neg'
 }
 
@@ -59,6 +59,7 @@ export default function TransactionList({
   const primary = (t: Transaction): string => {
     if (t.type === 'transfer') return 'Transfer'
     if (t.type === 'adjustment') return 'Balance adjustment'
+    if (t.type === 'goal') return 'Goal contribution'
     return catName(t.categoryId) ?? (t.type === 'income' ? 'Income' : 'Expense')
   }
 

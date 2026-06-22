@@ -48,6 +48,8 @@ describe('spendingByCategory', () => {
     tx({ categoryId: 'bills', amount: -1000 }),
     tx({ categoryId: 'food', amount: 9999, type: 'income' }), // income excluded
     tx({ amount: -3000, type: 'transfer' }), // transfer excluded
+    tx({ categoryId: 'food', amount: -1234, type: 'adjustment' }), // adjustment excluded
+    tx({ categoryId: 'food', amount: 4444, type: 'goal', goalId: 'g1' }), // goal earmark excluded
     tx({ categoryId: 'food', amount: -7777, date: new Date(2026, 4, 1).getTime() }), // May excluded
     tx({ amount: -500 }), // uncategorized expense
   ]
@@ -67,12 +69,13 @@ describe('spendingByCategory', () => {
 })
 
 describe('incomeExpenseByMonth', () => {
-  it('totals income and expense per month, excluding transfers', () => {
+  it('totals income and expense per month, excluding transfers, adjustments and goal earmarks', () => {
     const txns = [
       tx({ type: 'income', amount: 50000 }),
       tx({ type: 'expense', amount: -1500 }),
       tx({ type: 'transfer', amount: -9999 }),
       tx({ type: 'adjustment', amount: 1234 }),
+      tx({ type: 'goal', amount: 8000, goalId: 'g1' }), // earmark, never income
     ]
     const [june] = incomeExpenseByMonth(txns, ['2026-06'])
     expect(june.income).toBe(50000)

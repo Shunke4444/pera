@@ -59,6 +59,12 @@ describe('accountBalance', () => {
     const adjustment = tx({ accountId: 'maribank', amount: 5100, type: 'adjustment' })
     expect(accountBalance(a, [...txns, adjustment])).toBe(5000)
   })
+
+  it('ignores goal-earmark txns (a virtual contribution moves no real money)', () => {
+    const a = acct({ id: 'gcash', openingBalance: 10000 })
+    const txns = [tx({ accountId: 'gcash', amount: 5000, type: 'goal', goalId: 'g1' })]
+    expect(accountBalance(a, txns)).toBe(10000)
+  })
 })
 
 describe('transfers', () => {
@@ -156,6 +162,23 @@ describe('goalProgress', () => {
     const accounts = [acct({ id: 'efund', openingBalance: 20000 })]
     const txns = [tx({ accountId: 'efund', amount: 4000, type: 'income' })]
     expect(goalProgress(linked, txns, accounts)).toBe(24000)
+  })
+
+  it('sums goal-earmark contributions for a virtual goal', () => {
+    const txns = [
+      tx({ accountId: 'gcash', amount: 5000, type: 'goal', goalId: 'goal1' }),
+      tx({ accountId: 'gcash', amount: 3000, type: 'goal', goalId: 'goal1' }),
+    ]
+    expect(goalProgress(goal, txns)).toBe(8000)
+  })
+
+  it('a virtual goal contribution does not change net worth', () => {
+    const accounts = [acct({ id: 'gcash', openingBalance: 10000 })]
+    const before = netWorth(accounts, [])
+    const after = netWorth(accounts, [
+      tx({ accountId: 'gcash', amount: 5000, type: 'goal', goalId: 'goal1' }),
+    ])
+    expect(after).toBe(before)
   })
 })
 

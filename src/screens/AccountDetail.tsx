@@ -18,7 +18,7 @@ import AccountForm from '../components/AccountForm'
 import AddTransactionSheet from '../components/AddTransactionSheet'
 import TransactionList from '../components/TransactionList'
 import { Button, Field, Input } from '../ui/form'
-import { Dot, Eyebrow } from '../ui/common'
+import { Dot, Eyebrow, Loading } from '../ui/common'
 
 const TYPE_LABEL: Record<string, string> = {
   ewallet: 'E-wallet',
@@ -40,7 +40,11 @@ export default function AccountDetail() {
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [editTxn, setEditTxn] = useState<Transaction | undefined>()
 
-  if (!account) {
+  if (account === undefined) {
+    return <Loading label="Loading account…" />
+  }
+
+  if (account === null) {
     return (
       <div className="py-12 text-center text-muted">
         <p>Account not found.</p>

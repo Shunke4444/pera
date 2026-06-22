@@ -59,6 +59,7 @@ export default function Settings() {
   }
 
   const importJSON = async (file: File) => {
+    if (!window.confirm('Restore will replace all data on this device. Continue?')) return
     try {
       const data = JSON.parse(await readFileText(file))
       await importData(data)

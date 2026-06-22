@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Upload, FileSpreadsheet, FileText, Undo2, CheckCircle2 } from 'lucide-react'
 import { useAccounts, useCategories } from '../hooks'
 import { fileToMatrix } from '../lib/spreadsheet'
-import { pdfToLines, PdfPasswordError } from '../lib/pdf'
+import { PdfPasswordError } from '../lib/pdfError'
 import { PDF_PROFILES, profileById } from '../lib/pdfProfiles'
 import {
   parseMatrix,
@@ -113,6 +113,8 @@ export default function Import() {
     setBusy(true)
     setError('')
     try {
+      // pdfjs-dist is ~0.8 MB — only pull it in when a PDF is actually read.
+      const { pdfToLines } = await import('../lib/pdf')
       const lines = await pdfToLines(file, pw)
       const rows = profileById(profileId).parse(lines)
       if (rows.length === 0) {

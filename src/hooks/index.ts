@@ -32,9 +32,14 @@ export function useArchivedAccounts(): Account[] {
   )
 }
 
-/** A single account by id (undefined while loading or if missing). */
-export function useAccount(id: string | undefined): Account | undefined {
-  return useLiveQuery(() => (id ? db.accounts.get(id) : undefined), [id])
+/**
+ * A single account by id. Distinguishes the two empty states so screens don't
+ * flash "not found" on a cold deep-link:
+ *   `undefined` → still loading (live query hasn't emitted yet)
+ *   `null`      → loaded, but no such account
+ */
+export function useAccount(id: string | undefined): Account | null | undefined {
+  return useLiveQuery(async () => (id ? ((await db.accounts.get(id)) ?? null) : null), [id])
 }
 
 /** All transactions, newest first. Pass an accountId to scope to one account. */

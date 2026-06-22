@@ -12,6 +12,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { applyTheme, getStoredTheme, resolveTheme, type Resolved } from '../theme'
+import { setThemePref } from '../db/repo'
 import AddTransactionSheet from '../components/AddTransactionSheet'
 
 const TABS = [
@@ -36,6 +37,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     const next: Resolved = theme === 'dark' ? 'light' : 'dark'
     applyTheme(next)
     setTheme(next)
+    // Persist to the settings singleton too, so the DB-backed pref (used by
+    // export) can't drift from what's actually painted. Matches Settings.tsx.
+    void setThemePref(next)
   }
 
   return (

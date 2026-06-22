@@ -12,6 +12,7 @@ import {
 } from '../db/repo'
 import { parseMajorInput, fromMinor } from '../lib/money'
 import { toDateInput, fromDateInput } from '../lib/dates'
+import { isSheetEditable } from '../lib/txnTypes'
 import type { Transaction } from '../db/types'
 
 type Mode = 'expense' | 'income' | 'transfer' | 'adjustment'
@@ -40,10 +41,14 @@ export default function AddTransactionSheet({
   const [err, setErr] = useState('')
 
   const editing = !!editTxn
+  // A `goal` earmark can't be represented by the expense/income/transfer modes,
+  // so it must not be opened in this generic editor (it would render a blank,
+  // broken category UI). Block it with an explanation instead.
+  const blocked = !!editTxn && !isSheetEditable(editTxn.type)
 
   // (Re)initialise whenever the sheet opens or the edit target changes.
   useEffect(() => {
-    if (!open) return
+    if (!open || blocked) return
     if (editTxn) {
       setMode(editTxn.type as Mode)
       setAmount(String(Math.abs(fromMinor(editTxn.amount))))
@@ -146,8 +151,25 @@ export default function AddTransactionSheet({
   const canModeSwitch = !editing
 
   return (
-    <Modal open={open} onClose={close} title={title}>
-      {accounts.length === 0 ? (
+    <Modal open={open} onClose={close} title={blocked ? 'Goal contribution' : title}>
+      {blocked ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            This is a goal contribution. Manage it from the goal on the Goals screen — it can’t be
+            edited as a normal transaction.
+          </p>
+          <div className="flex items-center gap-2 pt-1">
+            <Button variant="ghost" onClick={close} className="flex-1">
+              Close
+            </Button>
+            <Button variant="danger" onClick={remove} aria-label="Delete contribution">
+              <span className="inline-flex items-center gap-1.5">
+                <Trash2 size={15} /> Delete
+              </span>
+            </Button>
+          </div>
+        </div>
+      ) : accounts.length === 0 ? (
         <p className="text-sm text-muted">Add an account first, then record transactions.</p>
       ) : (
         <div className="space-y-3">

@@ -14,10 +14,18 @@ import {
   exportData,
   importData,
   clearAllData,
+  addGoal,
+  contributeToGoal,
 } from './repo'
 import { seedIfEmpty } from './seed'
-import { accountBalance, netWorth } from '../lib/balances'
+import { accountBalance, netWorth, goalProgress } from '../lib/balances'
 import type { ParsedRow } from '../lib/importing'
+import type { Transaction } from './types'
+
+/** Σ of income txn amounts — the "total income" a contribution must never inflate. */
+function totalIncome(txns: Transaction[]): number {
+  return txns.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+}
 
 beforeEach(async () => {
   await db.delete()
@@ -143,6 +151,46 @@ describe('commitImport / undoImport', () => {
   })
 })
 
+describe('contributeToGoal', () => {
+  it('a virtual goal contribution does not change net worth or total income', async () => {
+    const { a } = await twoAccounts() // opening 10000
+    const goalId = await addGoal({ name: 'Japan trip', targetAmount: 100000 })
+
+    const nwBefore = netWorth(await db.accounts.toArray(), await db.transactions.toArray())
+    const incomeBefore = totalIncome(await db.transactions.toArray())
+
+    await contributeToGoal({ goalId, accountId: a, amount: 5000, date: Date.now() })
+
+    const accounts = await db.accounts.toArray()
+    const txns = await db.transactions.toArray()
+    expect(netWorth(accounts, txns)).toBe(nwBefore)
+    expect(totalIncome(txns)).toBe(incomeBefore)
+    // …but the contribution IS counted toward the goal.
+    const goal = (await db.goals.get(goalId))!
+    expect(goalProgress(goal, txns, accounts)).toBe(5000)
+    expect(txns.some((t) => t.type === 'goal' && t.goalId === goalId)).toBe(true)
+  })
+
+  it('a linked goal contribution moves money via transfer (net worth and income unchanged)', async () => {
+    const { a, b } = await twoAccounts() // a opening 10000 (spend), b opening 0 (backing)
+    const goalId = await addGoal({ name: 'Emergency fund', targetAmount: 100000, linkedAccountId: b })
+
+    const nwBefore = netWorth(await db.accounts.toArray(), await db.transactions.toArray())
+
+    await contributeToGoal({ goalId, accountId: a, amount: 4000, date: Date.now() })
+
+    const accounts = await db.accounts.toArray()
+    const txns = await db.transactions.toArray()
+    expect(netWorth(accounts, txns)).toBe(nwBefore) // transfer nets to zero
+    expect(totalIncome(txns)).toBe(0) // no fabricated income
+    expect(txns.filter((t) => t.type === 'transfer')).toHaveLength(2) // both legs
+    // progress = backing-account balance; money came out of the spending account.
+    const goal = (await db.goals.get(goalId))!
+    expect(goalProgress(goal, txns, accounts)).toBe(4000)
+    expect(accountBalance(accounts.find((x) => x.id === a)!, txns)).toBe(6000)
+  })
+})
+
 describe('backup export / import round-trip', () => {
   it('export -> clear -> import restores everything exactly', async () => {
     await seedIfEmpty()
@@ -169,5 +217,31 @@ describe('backup export / import round-trip', () => {
 
   it('rejects a non-Pera file', async () => {
     await expect(importData({ app: 'other' })).rejects.toThrow()
+  })
+
+  it('a malformed backup (a row missing its id) is rejected WITHOUT wiping existing data', async () => {
+    await seedIfEmpty()
+    const { a } = await twoAccounts()
+    await addTransaction({ accountId: a, amount: -1500, type: 'expense', date: Date.now() })
+    const accountsBefore = await db.accounts.count()
+    const txnsBefore = await db.transactions.count()
+    expect(accountsBefore).toBeGreaterThan(0)
+    expect(txnsBefore).toBeGreaterThan(0)
+
+    const malformed = {
+      app: 'pera',
+      version: 1,
+      accounts: [{ name: 'No id here' }], // <- missing id: arrays alone are not enough
+      transactions: [],
+      categories: [],
+      budgets: [],
+      goals: [],
+      settings: [],
+    }
+    await expect(importData(malformed)).rejects.toThrow()
+
+    // Restore is the recovery path — a bad file must never empty the live DB.
+    expect(await db.accounts.count()).toBe(accountsBefore)
+    expect(await db.transactions.count()).toBe(txnsBefore)
   })
 })
