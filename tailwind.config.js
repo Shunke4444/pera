@@ -16,6 +16,7 @@ export default {
         muted: 'var(--text-muted)',
         dim: 'var(--text-dim)',
         accent: 'var(--accent)',
+        'on-accent': 'var(--on-accent)',
         pos: 'var(--pos)',
         neg: 'var(--neg)',
         warn: 'var(--warn)'

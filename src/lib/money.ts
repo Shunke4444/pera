@@ -50,6 +50,14 @@ export function formatCompactPHP(minor: number): string {
   return formatPHP(minor)
 }
 
+/** Placeholder shown for any peso figure while balances are hidden. */
+export const MASK = '₱ ••••'
+
+/** formatPHP, or the privacy mask when `hidden` — one rule for every money site. */
+export function maskPHP(minor: number, hidden: boolean): string {
+  return hidden ? MASK : formatPHP(minor)
+}
+
 /**
  * Parse a user-typed amount in major units ("1,234.5", "₱99", "-50") into
  * integer minor units. Returns null for empty/garbage so callers can validate.

@@ -1,5 +1,6 @@
 import type { Account, Category, Transaction } from '../db/types'
-import { formatSignedPHP } from '../lib/money'
+import { formatSignedPHP, MASK } from '../lib/money'
+import { useHiddenBalances } from '../hooks'
 import { Dot, EmptyState } from '../ui/common'
 
 function dayLabel(ms: number): string {
@@ -35,6 +36,8 @@ export default function TransactionList({
   selected?: Set<string>
   onToggle?: (id: string) => void
 }) {
+  const [hidden] = useHiddenBalances()
+
   if (txns.length === 0) {
     return <EmptyState title="No transactions" hint={emptyHint} />
   }
@@ -102,7 +105,7 @@ export default function TransactionList({
                   <span
                     className={`flex-none font-display text-sm font-bold tabular-nums ${amountClass(t)}`}
                   >
-                    {formatSignedPHP(t.amount)}
+                    {hidden ? MASK : formatSignedPHP(t.amount)}
                   </span>
                 </button>
               </div>

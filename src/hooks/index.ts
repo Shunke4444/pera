@@ -8,6 +8,8 @@ import {
   type AssetsLiabilities,
 } from '../lib/balances'
 
+export { useHiddenBalances, setHiddenBalances } from './useHiddenBalances'
+
 /** Non-archived accounts, in sort order. */
 export function useAccounts(): Account[] {
   return (

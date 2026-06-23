@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, ShieldAlert, X } from 'lucide-react'
+import { Plus, ShieldAlert, X, Eye, EyeOff } from 'lucide-react'
 import {
   useAccounts,
   useTransactions,
@@ -8,10 +8,12 @@ import {
   useAssetsLiabilities,
   useGoals,
   useSettings,
+  useHiddenBalances,
 } from '../hooks'
 import { accountBalance, monthKey } from '../lib/balances'
 import { shouldRemindBackup } from '../lib/backup'
-import { formatCompactPHP, formatPHP } from '../lib/money'
+import { formatCompactPHP, formatPHP, maskPHP } from '../lib/money'
+import { presentTypes, filterAccountsByType, TYPE_LABEL, type AccountFilter } from '../lib/accounts'
 import type { Account } from '../db/types'
 import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
@@ -27,10 +29,27 @@ export default function Dashboard() {
   const { assets, liabilities } = useAssetsLiabilities()
   const goals = useGoals()
   const settings = useSettings()
+  const [hidden, toggleHidden] = useHiddenBalances()
   const [addOpen, setAddOpen] = useState(false)
+  const [storedFilter, setStoredFilter] = useState<AccountFilter>(
+    () => (localStorage.getItem('pera-account-filter') as AccountFilter) || 'all',
+  )
   const [hideReminder, setHideReminder] = useState(
     () => localStorage.getItem('pera-backup-dismissed') === new Date().toDateString(),
   )
+
+  // Available type chips, and the effective filter (fall back to All if the
+  // stored type no longer has any accounts).
+  const types = presentTypes(accounts)
+  const filter: AccountFilter =
+    storedFilter !== 'all' && types.includes(storedFilter) ? storedFilter : 'all'
+  const selectFilter = (f: AccountFilter) => {
+    setStoredFilter(f)
+    localStorage.setItem('pera-account-filter', f)
+  }
+  const shown = filterAccountsByType(accounts, filter)
+  const filterSubtotal =
+    filter === 'all' ? 0 : shown.reduce((s, a) => s + accountBalance(a, txns), 0)
   const thisMonth = monthKey(Date.now())
   const spentThisMonth = txns
     .filter((t) => t.type === 'expense' && monthKey(t.date) === thisMonth)
@@ -44,8 +63,9 @@ export default function Dashboard() {
   }
 
   // Preserve bank order by first appearance (accounts already sort-ordered).
+  // Built from the filtered subset so the grid scopes to the selected type.
   const groups: { bank: string; accounts: Account[] }[] = []
-  for (const a of accounts) {
+  for (const a of shown) {
     let g = groups.find((x) => x.bank === a.bank)
     if (!g) {
       g = { bank: a.bank, accounts: [] }
@@ -87,12 +107,21 @@ export default function Dashboard() {
       )}
 
       <section>
-        <Eyebrow>Net worth</Eyebrow>
+        <div className="flex items-start justify-between">
+          <Eyebrow>Net worth</Eyebrow>
+          <button
+            onClick={toggleHidden}
+            aria-label={hidden ? 'Show balances' : 'Hide balances'}
+            className="-mt-1 -mr-1 rounded-pill p-1.5 text-dim hover:text-text"
+          >
+            {hidden ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
+        </div>
         <p
           className="font-display text-[42px] font-bold leading-none tracking-tight"
-          title={formatPHP(netWorth)}
+          title={hidden ? undefined : formatPHP(netWorth)}
         >
-          {formatCompactPHP(netWorth)}
+          {hidden ? maskPHP(netWorth, true) : formatCompactPHP(netWorth)}
         </p>
         {/* Net worth already equals assets when nothing is owed — only split it
             out once a credit/loan account carries a balance (liabilities < 0). */}
@@ -101,18 +130,49 @@ export default function Dashboard() {
             <div className="rounded-tile border border-border bg-surface px-3 py-2">
               <Eyebrow>Assets</Eyebrow>
               <p className="font-display text-base font-bold text-pos">
-                {formatCompactPHP(assets)}
+                {hidden ? maskPHP(assets, true) : formatCompactPHP(assets)}
               </p>
             </div>
             <div className="rounded-tile border border-border bg-surface px-3 py-2">
               <Eyebrow>Liabilities</Eyebrow>
               <p className="font-display text-base font-bold text-neg">
-                {formatCompactPHP(liabilities)}
+                {hidden ? maskPHP(liabilities, true) : formatCompactPHP(liabilities)}
               </p>
             </div>
           </div>
         )}
       </section>
+
+      {accounts.length > 0 && (
+        <section className="-mt-2 space-y-1.5">
+          <div className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {(['all', ...types] as AccountFilter[]).map((t) => {
+              const active = filter === t
+              return (
+                <button
+                  key={t}
+                  onClick={() => selectFilter(t)}
+                  className={`flex-none rounded-pill px-3 py-1.5 text-xs font-semibold ${
+                    active
+                      ? 'bg-accent text-on-accent'
+                      : 'border border-border text-muted hover:text-text'
+                  }`}
+                >
+                  {t === 'all' ? 'All' : TYPE_LABEL[t]}
+                </button>
+              )
+            })}
+          </div>
+          {filter !== 'all' && (
+            <p className="text-xs text-muted">
+              {TYPE_LABEL[filter]} ·{' '}
+              <span className="font-display font-bold text-text">
+                {maskPHP(filterSubtotal, hidden)}
+              </span>
+            </p>
+          )}
+        </section>
+      )}
 
       {accounts.length > 0 && spentThisMonth > 0 && (
         <Link
@@ -121,7 +181,7 @@ export default function Dashboard() {
         >
           <Eyebrow>Spent this month</Eyebrow>
           <p className="mt-1 font-display text-lg font-bold tracking-tight text-neg">
-            {formatCompactPHP(spentThisMonth)}
+            {hidden ? maskPHP(spentThisMonth, true) : formatCompactPHP(spentThisMonth)}
           </p>
         </Link>
       )}

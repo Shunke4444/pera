@@ -6,6 +6,8 @@ import {
   formatSignedPHP,
   formatCompactPHP,
   parseMajorInput,
+  maskPHP,
+  MASK,
 } from './money'
 
 describe('toMinor', () => {
@@ -83,6 +85,17 @@ describe('formatCompactPHP', () => {
 
   it('handles huge negatives without exploding length', () => {
     expect(formatCompactPHP(-500_000_000_00).length).toBeLessThanOrEqual(11)
+  })
+})
+
+describe('maskPHP', () => {
+  it('formats normally when not hidden', () => {
+    expect(maskPHP(123450, false)).toBe(formatPHP(123450))
+  })
+  it('returns the mask when hidden, regardless of value', () => {
+    expect(maskPHP(123450, true)).toBe(MASK)
+    expect(maskPHP(0, true)).toBe(MASK)
+    expect(maskPHP(-5025, true)).toBe(MASK)
   })
 })
 

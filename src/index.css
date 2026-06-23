@@ -6,11 +6,13 @@
   --bg: #0b0c10; --surface: #14161d; --surface-2: #1b1e26; --border: #20232c;
   --text: #f4f5f7; --text-muted: #9aa0aa; --text-dim: #7e848e;
   --accent: #34d399; --pos: #34d399; --neg: #f87171; --warn: #fbbf24;
+  --on-accent: #06281e; /* legible dark text on the accent fill */
 }
 :root[data-theme='light'] {
   --bg: #f6f7f9; --surface: #ffffff; --surface-2: #ffffff; --border: #e6e8ec;
   --text: #14161d; --text-muted: #5f6671; --text-dim: #8a909b;
   --accent: #0fb67e; --pos: #0fb67e; --neg: #dc2626; --warn: #d97706;
+  --on-accent: #06281e; /* legible dark text on the accent fill */
 }
 
 * { box-sizing: border-box; }

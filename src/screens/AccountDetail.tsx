@@ -8,9 +8,9 @@ import {
   Plus,
   Scale,
 } from 'lucide-react'
-import { useAccount, useTransactions, useCategories } from '../hooks'
+import { useAccount, useTransactions, useCategories, useHiddenBalances } from '../hooks'
 import { accountBalance } from '../lib/balances'
-import { formatPHP, parseMajorInput } from '../lib/money'
+import { formatPHP, maskPHP, parseMajorInput } from '../lib/money'
 import { archiveAccount, adjustBalance } from '../db/repo'
 import type { Transaction } from '../db/types'
 import Modal from '../ui/Modal'
@@ -34,6 +34,7 @@ export default function AccountDetail() {
   const account = useAccount(id)
   const txns = useTransactions(id)
   const categories = useCategories()
+  const [hidden] = useHiddenBalances()
   const navigate = useNavigate()
   const [editOpen, setEditOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -73,12 +74,14 @@ export default function AccountDetail() {
           <span className="text-dim">· {TYPE_LABEL[account.type] ?? account.type}</span>
         </div>
         <p className="mt-1 font-display text-[34px] font-bold leading-none tracking-tight">
-          {formatPHP(bal)}
+          {maskPHP(bal, hidden)}
         </p>
         {account.archived && (
           <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-warn">Archived</p>
         )}
-        <p className="mt-1 text-xs text-dim">Opening balance {formatPHP(account.openingBalance)}</p>
+        <p className="mt-1 text-xs text-dim">
+          Opening balance {maskPHP(account.openingBalance, hidden)}
+        </p>
       </section>
 
       <div className="flex flex-wrap gap-2">

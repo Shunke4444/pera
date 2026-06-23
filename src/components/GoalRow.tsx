@@ -2,7 +2,8 @@ import { Link } from 'react-router-dom'
 import type { Account, Goal, Transaction } from '../db/types'
 import { goalProgress } from '../lib/balances'
 import { goalStats } from '../lib/goals'
-import { formatCompactPHP, formatPHP } from '../lib/money'
+import { formatCompactPHP, formatPHP, maskPHP } from '../lib/money'
+import { useHiddenBalances } from '../hooks'
 import GoalRing from './GoalRing'
 
 /**
@@ -20,6 +21,7 @@ export default function GoalRow({
   accounts: Account[]
   txns: Transaction[]
 }) {
+  const [hidden] = useHiddenBalances()
   const saved = goalProgress(goal, txns, accounts)
   const { pct } = goalStats(goal.targetAmount, saved)
   const linked = goal.linkedAccountId
@@ -35,10 +37,13 @@ export default function GoalRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-medium text-text">{goal.name}</p>
         <p className="mt-0.5 truncate text-xs">
-          <span className="font-display font-bold text-text" title={formatPHP(saved)}>
-            {formatCompactPHP(saved)}
+          <span className="font-display font-bold text-text" title={hidden ? undefined : formatPHP(saved)}>
+            {hidden ? maskPHP(saved, true) : formatCompactPHP(saved)}
           </span>
-          <span className="text-muted"> / {formatCompactPHP(goal.targetAmount)}</span>
+          <span className="text-muted">
+            {' '}
+            / {hidden ? maskPHP(goal.targetAmount, true) : formatCompactPHP(goal.targetAmount)}
+          </span>
           {linked && <span className="text-muted"> · Tracks {linked.name}</span>}
         </p>
       </div>
