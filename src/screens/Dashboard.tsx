@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, ShieldAlert, X, Eye, EyeOff } from 'lucide-react'
+import { Plus, ShieldAlert, X, Eye, EyeOff, Repeat } from 'lucide-react'
 import {
   useAccounts,
   useTransactions,
@@ -9,11 +9,14 @@ import {
   useGoals,
   useSettings,
   useHiddenBalances,
+  useRecurring,
 } from '../hooks'
 import { accountBalance, monthKey } from '../lib/balances'
 import { shouldRemindBackup } from '../lib/backup'
-import { formatCompactPHP, formatPHP, maskPHP } from '../lib/money'
+import { formatCompactPHP, formatPHP, formatSignedPHP, maskPHP, MASK } from '../lib/money'
 import { presentTypes, filterAccountsByType, TYPE_LABEL, type AccountFilter } from '../lib/accounts'
+import { upcomingOccurrences } from '../lib/recurring'
+import { postRecurringNow } from '../db/repo'
 import type { Account } from '../db/types'
 import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
@@ -29,6 +32,8 @@ export default function Dashboard() {
   const { assets, liabilities } = useAssetsLiabilities()
   const goals = useGoals()
   const settings = useSettings()
+  const recurring = useRecurring()
+  const upcoming = upcomingOccurrences(recurring, Date.now(), 14).slice(0, 5)
   const [hidden, toggleHidden] = useHiddenBalances()
   const [addOpen, setAddOpen] = useState(false)
   const [storedFilter, setStoredFilter] = useState<AccountFilter>(
@@ -184,6 +189,59 @@ export default function Dashboard() {
             {hidden ? maskPHP(spentThisMonth, true) : formatCompactPHP(spentThisMonth)}
           </p>
         </Link>
+      )}
+
+      {upcoming.length > 0 && (
+        <section className="space-y-2">
+          <SectionTitle>Upcoming</SectionTitle>
+          <div className="overflow-hidden rounded-card border border-border bg-surface">
+            {upcoming.map((u, i) => {
+              const r = u.rule
+              const signed = r.type === 'income' ? Math.abs(r.amount) : -Math.abs(r.amount)
+              const when =
+                u.inDays < 0
+                  ? 'Overdue'
+                  : u.inDays === 0
+                    ? 'Today'
+                    : `in ${u.inDays} day${u.inDays === 1 ? '' : 's'}`
+              return (
+                <div
+                  key={`${r.id}-${u.date}`}
+                  className={`flex items-center gap-3 px-3.5 py-2.5 ${
+                    i > 0 ? 'border-t border-border' : ''
+                  }`}
+                >
+                  <Repeat size={15} className="flex-none text-dim" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-text">
+                      {r.note || (r.type === 'income' ? 'Income' : 'Expense')}
+                    </p>
+                    <p className={`text-xs ${u.inDays < 0 ? 'text-warn' : 'text-dim'}`}>{when}</p>
+                  </div>
+                  <span
+                    className={`flex-none font-display text-sm font-bold tabular-nums ${
+                      r.type === 'income' ? 'text-pos' : 'text-neg'
+                    }`}
+                  >
+                    {hidden ? MASK : formatSignedPHP(signed)}
+                  </span>
+                  {r.autoPost ? (
+                    <span className="flex-none text-[10px] font-semibold uppercase tracking-wider text-dim">
+                      Auto
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => postRecurringNow(r.id)}
+                      className="flex-none rounded-pill border border-border px-2.5 py-1 text-xs font-semibold text-muted hover:text-text"
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
       )}
 
       <section className="space-y-4">

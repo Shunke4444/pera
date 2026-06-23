@@ -1,7 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
-import { listGoals } from '../db/repo'
-import type { Account, Transaction, Category, Budget, Goal, Settings } from '../db/types'
+import { listGoals, listRecurring } from '../db/repo'
+import type {
+  Account,
+  Transaction,
+  Category,
+  Budget,
+  Goal,
+  Settings,
+  RecurringRule,
+} from '../db/types'
 import {
   netWorth,
   assetsLiabilities,
@@ -67,6 +75,21 @@ export function useBudgets(): Budget[] {
 
 export function useGoals(): Goal[] {
   return useLiveQuery(() => listGoals(), []) ?? []
+}
+
+/** Non-archived recurring rules, soonest next run first. */
+export function useRecurring(): RecurringRule[] {
+  return useLiveQuery(() => listRecurring(), []) ?? []
+}
+
+/** Every recurring rule incl. paused (archived), soonest next run first. */
+export function useAllRecurring(): RecurringRule[] {
+  return (
+    useLiveQuery(async () => {
+      const rows = await db.recurring.toArray()
+      return rows.sort((a, b) => a.nextRunDate - b.nextRunDate)
+    }, []) ?? []
+  )
 }
 
 export function useSettings(): Settings | undefined {

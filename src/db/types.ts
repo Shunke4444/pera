@@ -47,6 +47,29 @@ export interface Transaction {
   note?: string
   importBatchId?: string
   importHash?: string
+  recurringId?: string // the recurring rule that generated this txn (trace + dedupe)
+  createdAt: number
+  updatedAt: number
+}
+
+export type RecurringFreq = 'weekly' | 'monthly' | 'yearly'
+
+export interface RecurringRule {
+  id: string
+  accountId: string
+  type: 'income' | 'expense'
+  amount: number // positive minor-unit magnitude; sign derived from `type`
+  categoryId?: string
+  note?: string
+  freq: RecurringFreq
+  interval: number // >= 1 (every N freq units)
+  anchorDay?: number // day-of-month for monthly/yearly; 0–6 for weekly
+  startDate: number // epoch ms
+  endDate?: number // epoch ms; rule stops after this day
+  nextRunDate: number // epoch ms of the earliest not-yet-posted occurrence
+  autoPost: boolean // true = create the txn automatically; false = remind only
+  lastPostedDate?: number // epoch ms of the most recent posted occurrence
+  archived: boolean
   createdAt: number
   updatedAt: number
 }

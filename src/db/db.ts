@@ -6,6 +6,7 @@ import type {
   Budget,
   Goal,
   Settings,
+  RecurringRule,
 } from './types'
 
 export type {
@@ -15,6 +16,7 @@ export type {
   Budget,
   Goal,
   Settings,
+  RecurringRule,
 } from './types'
 
 /**
@@ -47,6 +49,7 @@ export class PeraDB extends Dexie {
   budgets!: Table<Budget, string>
   goals!: Table<Goal, string>
   settings!: Table<Settings, string>
+  recurring!: Table<RecurringRule, string>
 
   constructor() {
     super('pera')
@@ -61,6 +64,12 @@ export class PeraDB extends Dexie {
       budgets: 'id, categoryId',
       goals: 'id, linkedAccountId',
       settings: 'id',
+    })
+    // v2 (additive): recurring rules. Dexie upgrades existing v1 data in place;
+    // the v1 block above is left untouched. `recurringId` on Transaction is not
+    // indexed (dedupe scans by accountId), so transactions keeps its v1 schema.
+    this.version(2).stores({
+      recurring: 'id, accountId, nextRunDate',
     })
   }
 }

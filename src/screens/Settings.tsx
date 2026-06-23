@@ -32,6 +32,8 @@ import type { Account } from '../db/types'
 import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
 import CategoryManager from '../components/CategoryManager'
+import RecurringManager from '../components/RecurringManager'
+import { useRecurring } from '../hooks'
 import { Button } from '../ui/form'
 import { Dot, Eyebrow, SectionTitle } from '../ui/common'
 
@@ -44,6 +46,8 @@ export default function Settings() {
   const [editing, setEditing] = useState<Account | null>(null)
   const [adding, setAdding] = useState(false)
   const [managingCats, setManagingCats] = useState(false)
+  const [managingRecurring, setManagingRecurring] = useState(false)
+  const recurring = useRecurring()
   const [msg, setMsg] = useState('')
   const [theme, setThemeState] = useState<Theme>(getStoredTheme())
 
@@ -181,6 +185,18 @@ export default function Settings() {
         </button>
       </section>
 
+      {/* Recurring */}
+      <section className="space-y-2">
+        <Eyebrow>Recurring</Eyebrow>
+        <button
+          onClick={() => setManagingRecurring(true)}
+          className="flex w-full items-center justify-between rounded-card border border-border bg-surface px-3.5 py-3 text-sm font-medium"
+        >
+          <span>Recurring & upcoming bills</span>
+          <span className="text-xs text-dim">{recurring.length}</span>
+        </button>
+      </section>
+
       {/* Backup */}
       <section className="space-y-2">
         <Eyebrow>Backup & data</Eyebrow>
@@ -247,6 +263,13 @@ export default function Settings() {
       </Modal>
       <Modal open={managingCats} onClose={() => setManagingCats(false)} title="Manage categories">
         <CategoryManager />
+      </Modal>
+      <Modal
+        open={managingRecurring}
+        onClose={() => setManagingRecurring(false)}
+        title="Recurring & upcoming"
+      >
+        <RecurringManager />
       </Modal>
     </div>
   )

@@ -8,6 +8,7 @@ import type {
   Goal,
   Settings,
   Transaction,
+  RecurringRule,
 } from '../db/types'
 import { fromMinor } from './money'
 import { toDateInput } from './dates'
@@ -22,6 +23,9 @@ export interface BackupV1 {
   budgets: Budget[]
   goals: Goal[]
   settings: Settings[]
+  // Added with recurring transactions; optional so pre-recurring backups (which
+  // omit the key) still validate and restore.
+  recurring?: RecurringRule[]
 }
 
 export interface BackupTables {
@@ -31,6 +35,7 @@ export interface BackupTables {
   budgets: Budget[]
   goals: Goal[]
   settings: Settings[]
+  recurring?: RecurringRule[]
 }
 
 export function buildBackup(tables: BackupTables, exportedAt: number): BackupV1 {
@@ -55,7 +60,12 @@ export function isValidBackup(obj: unknown): obj is BackupV1 {
   const b = obj as Record<string, unknown>
   if (b.app !== 'pera' || b.version !== 1) return false
   const arrays = ['accounts', 'transactions', 'categories', 'budgets', 'goals', 'settings']
-  return arrays.every((k) => Array.isArray(b[k]) && (b[k] as unknown[]).every(isRow))
+  const requiredOk = arrays.every((k) => Array.isArray(b[k]) && (b[k] as unknown[]).every(isRow))
+  // `recurring` is optional (older backups omit it); if present it must be valid.
+  const recurringOk =
+    b.recurring === undefined ||
+    (Array.isArray(b.recurring) && (b.recurring as unknown[]).every(isRow))
+  return requiredOk && recurringOk
 }
 
 function csvCell(v: string | number): string {
