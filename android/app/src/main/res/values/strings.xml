@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pera</string>
+    <string name="title_activity_main">Pera</string>
+    <string name="package_name">app.pera.tracker</string>
+    <string name="custom_url_scheme">app.pera.tracker</string>
+</resources>
