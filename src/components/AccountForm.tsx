@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { Archive, ArchiveRestore, Trash2 } from 'lucide-react'
 import type { Account, AccountType } from '../db/types'
-import { addAccount, updateAccount } from '../db/repo'
+import { addAccount, updateAccount, archiveAccount, deleteAccount } from '../db/repo'
 import { fromMinor, parseMajorInput } from '../lib/money'
 import { Button, Field, Input, Select } from '../ui/form'
 
@@ -68,6 +69,22 @@ export default function AccountForm({
     } catch (e) {
       setErr(`Couldn't save — ${e instanceof Error ? e.message : 'please try again.'}`)
     }
+  }
+
+  const toggleArchive = async () => {
+    await archiveAccount(account!.id, !account!.archived)
+    onDone()
+  }
+
+  const remove = async () => {
+    if (
+      !window.confirm(
+        `Delete ${account!.name} and all its transactions? This can’t be undone.`,
+      )
+    )
+      return
+    await deleteAccount(account!.id)
+    onDone()
   }
 
   return (
@@ -140,6 +157,26 @@ export default function AccountForm({
           Cancel
         </Button>
       </div>
+
+      {editing && (
+        <div className="space-y-2 border-t border-border pt-3">
+          <Button variant="ghost" className="w-full" onClick={toggleArchive}>
+            <span className="inline-flex items-center gap-1.5">
+              {account!.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+              {account!.archived ? 'Unarchive account' : 'Archive account'}
+            </span>
+          </Button>
+          <Button variant="danger" className="w-full" onClick={remove}>
+            <span className="inline-flex items-center gap-1.5">
+              <Trash2 size={15} /> Delete account
+            </span>
+          </Button>
+          <p className="text-xs text-dim">
+            Archiving hides an account from your dashboard and net worth — reversible from Settings.
+            Deleting removes it and its transactions for good.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

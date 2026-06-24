@@ -14,7 +14,15 @@ import {
 import { accountBalance, monthKey } from '../lib/balances'
 import { shouldRemindBackup } from '../lib/backup'
 import { formatCompactPHP, formatPHP, formatSignedPHP, maskPHP, MASK } from '../lib/money'
-import { presentTypes, filterAccountsByType, TYPE_LABEL, type AccountFilter } from '../lib/accounts'
+import {
+  homeViews,
+  resolveHomeView,
+  isAccountView,
+  filterAccountsByType,
+  TYPE_LABEL,
+  VIEW_LABEL,
+  type HomeView,
+} from '../lib/accounts'
 import { upcomingOccurrences } from '../lib/recurring'
 import { postRecurringNow } from '../db/repo'
 import type { Account } from '../db/types'
@@ -22,6 +30,10 @@ import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
 import AccountTile from '../components/AccountTile'
 import GoalRow from '../components/GoalRow'
+import GoalForm from '../components/GoalForm'
+import BudgetSummary from '../components/BudgetSummary'
+import MonthlyBudgetForm from '../components/MonthlyBudgetForm'
+import RecurringManager from '../components/RecurringManager'
 import { Button } from '../ui/form'
 import { Eyebrow, EmptyState, SectionTitle } from '../ui/common'
 
@@ -35,26 +47,35 @@ export default function Dashboard() {
   const recurring = useRecurring()
   const upcoming = upcomingOccurrences(recurring, Date.now(), 14).slice(0, 5)
   const [hidden, toggleHidden] = useHiddenBalances()
-  const [addOpen, setAddOpen] = useState(false)
-  const [storedFilter, setStoredFilter] = useState<AccountFilter>(
-    () => (localStorage.getItem('pera-account-filter') as AccountFilter) || 'all',
+
+  // Modals, one per contextual "Add" affordance.
+  const [addAccountOpen, setAddAccountOpen] = useState(false)
+  const [addGoalOpen, setAddGoalOpen] = useState(false)
+  const [editBudgetOpen, setEditBudgetOpen] = useState(false)
+  const [recurringOpen, setRecurringOpen] = useState(false)
+
+  const [storedView, setStoredView] = useState<string | null>(() =>
+    localStorage.getItem('pera-home-view'),
   )
   const [hideReminder, setHideReminder] = useState(
     () => localStorage.getItem('pera-backup-dismissed') === new Date().toDateString(),
   )
 
-  // Available type chips, and the effective filter (fall back to All if the
-  // stored type no longer has any accounts).
-  const types = presentTypes(accounts)
-  const filter: AccountFilter =
-    storedFilter !== 'all' && types.includes(storedFilter) ? storedFilter : 'all'
-  const selectFilter = (f: AccountFilter) => {
-    setStoredFilter(f)
-    localStorage.setItem('pera-account-filter', f)
+  // Resolve the persisted chip against what's available (a type chip vanishes
+  // when its last account is archived → fall back to All).
+  const views = homeViews(accounts)
+  const view = resolveHomeView(storedView, accounts)
+  const selectView = (v: HomeView) => {
+    setStoredView(v)
+    localStorage.setItem('pera-home-view', v)
   }
-  const shown = filterAccountsByType(accounts, filter)
+
+  const shown = isAccountView(view) ? filterAccountsByType(accounts, view) : []
   const filterSubtotal =
-    filter === 'all' ? 0 : shown.reduce((s, a) => s + accountBalance(a, txns), 0)
+    view !== 'all' && isAccountView(view)
+      ? shown.reduce((s, a) => s + accountBalance(a, txns), 0)
+      : 0
+
   const thisMonth = monthKey(Date.now())
   const spentThisMonth = txns
     .filter((t) => t.type === 'expense' && monthKey(t.date) === thisMonth)
@@ -67,8 +88,9 @@ export default function Dashboard() {
     setHideReminder(true)
   }
 
-  // Preserve bank order by first appearance (accounts already sort-ordered).
-  // Built from the filtered subset so the grid scopes to the selected type.
+  // Group the visible accounts into render blocks: a bank with ≥2 accounts gets
+  // its own headed group; lone accounts merge into a shared header-less 2-col
+  // grid (so 4 single-bank accounts read as one clean 2×2).
   const groups: { bank: string; accounts: Account[] }[] = []
   for (const a of shown) {
     let g = groups.find((x) => x.bank === a.bank)
@@ -78,10 +100,6 @@ export default function Dashboard() {
     }
     g.accounts.push(a)
   }
-
-  // Render blocks, in order: a bank with ≥2 accounts becomes its own headed
-  // group; lone accounts merge into a shared header-less 2-col grid (so 4
-  // single-bank accounts read as one clean 2×2, matching the mock).
   type Block =
     | { kind: 'singles'; accounts: Account[] }
     | { kind: 'group'; bank: string; accounts: Account[] }
@@ -95,6 +113,8 @@ export default function Dashboard() {
       else blocks.push({ kind: 'singles', accounts: [...g.accounts] })
     }
   }
+
+  const monthlyCap = settings?.monthlyBudget
 
   return (
     <div className="space-y-6">
@@ -111,6 +131,7 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Net worth — pinned above the chip selector for every view. */}
       <section>
         <div className="flex items-start justify-between">
           <Eyebrow>Net worth</Eyebrow>
@@ -128,8 +149,6 @@ export default function Dashboard() {
         >
           {hidden ? maskPHP(netWorth, true) : formatCompactPHP(netWorth)}
         </p>
-        {/* Net worth already equals assets when nothing is owed — only split it
-            out once a credit/loan account carries a balance (liabilities < 0). */}
         {liabilities < 0 && (
           <div className="mt-3 grid grid-cols-2 gap-2.5">
             <div className="rounded-tile border border-border bg-surface px-3 py-2">
@@ -148,165 +167,181 @@ export default function Dashboard() {
         )}
       </section>
 
-      {accounts.length > 0 && (
-        <section className="-mt-2 space-y-1.5">
-          <div className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(['all', ...types] as AccountFilter[]).map((t) => {
-              const active = filter === t
-              return (
-                <button
-                  key={t}
-                  onClick={() => selectFilter(t)}
-                  className={`flex-none rounded-pill px-3 py-1.5 text-xs font-semibold ${
-                    active
-                      ? 'bg-accent text-on-accent'
-                      : 'border border-border text-muted hover:text-text'
-                  }`}
-                >
-                  {t === 'all' ? 'All' : TYPE_LABEL[t]}
-                </button>
-              )
-            })}
-          </div>
-          {filter !== 'all' && (
-            <p className="text-xs text-muted">
-              {TYPE_LABEL[filter]} ·{' '}
+      {/* The home's main selector. */}
+      <section className="-mt-2">
+        <div className="flex gap-2 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {views.map((v) => {
+            const active = view === v
+            return (
+              <button
+                key={v}
+                onClick={() => selectView(v)}
+                className={`flex-none rounded-pill px-3.5 py-1.5 text-xs font-semibold ${
+                  active
+                    ? 'bg-accent text-on-accent'
+                    : 'border border-border text-muted hover:text-text'
+                }`}
+              >
+                {VIEW_LABEL[v]}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ---- Account views (All / a single type) ---- */}
+      {isAccountView(view) && (
+        <>
+          {view !== 'all' && accounts.length > 0 && (
+            <p className="-mt-3 text-xs text-muted">
+              {TYPE_LABEL[view]} ·{' '}
               <span className="font-display font-bold text-text">
                 {maskPHP(filterSubtotal, hidden)}
               </span>
             </p>
           )}
-        </section>
-      )}
 
-      {accounts.length > 0 && spentThisMonth > 0 && (
-        <Link
-          to="/insights"
-          className="block rounded-card border border-border bg-surface p-3.5"
-        >
-          <Eyebrow>Spent this month</Eyebrow>
-          <p className="mt-1 font-display text-lg font-bold tracking-tight text-neg">
-            {hidden ? maskPHP(spentThisMonth, true) : formatCompactPHP(spentThisMonth)}
-          </p>
-        </Link>
-      )}
+          {view === 'all' && accounts.length > 0 && spentThisMonth > 0 && (
+            <Link to="/insights" className="block rounded-card border border-border bg-surface p-4">
+              <Eyebrow>Spent this month</Eyebrow>
+              <p className="mt-1 font-display text-lg font-bold tracking-tight text-neg">
+                {hidden ? maskPHP(spentThisMonth, true) : formatCompactPHP(spentThisMonth)}
+              </p>
+            </Link>
+          )}
 
-      {upcoming.length > 0 && (
-        <section className="space-y-2">
-          <SectionTitle>Upcoming</SectionTitle>
-          <div className="overflow-hidden rounded-card border border-border bg-surface">
-            {upcoming.map((u, i) => {
-              const r = u.rule
-              const signed = r.type === 'income' ? Math.abs(r.amount) : -Math.abs(r.amount)
-              const when =
-                u.inDays < 0
-                  ? 'Overdue'
-                  : u.inDays === 0
-                    ? 'Today'
-                    : `in ${u.inDays} day${u.inDays === 1 ? '' : 's'}`
-              return (
-                <div
-                  key={`${r.id}-${u.date}`}
-                  className={`flex items-center gap-3 px-3.5 py-2.5 ${
-                    i > 0 ? 'border-t border-border' : ''
-                  }`}
+          {view === 'all' && upcoming.length > 0 && (
+            <section className="space-y-2">
+              <div className="flex items-center justify-between">
+                <SectionTitle>Upcoming</SectionTitle>
+                <button
+                  onClick={() => setRecurringOpen(true)}
+                  className="text-xs font-semibold text-accent hover:underline"
                 >
-                  <Repeat size={15} className="flex-none text-dim" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-text">
-                      {r.note || (r.type === 'income' ? 'Income' : 'Expense')}
-                    </p>
-                    <p className={`text-xs ${u.inDays < 0 ? 'text-warn' : 'text-dim'}`}>{when}</p>
-                  </div>
-                  <span
-                    className={`flex-none font-display text-sm font-bold tabular-nums ${
-                      r.type === 'income' ? 'text-pos' : 'text-neg'
-                    }`}
-                  >
-                    {hidden ? MASK : formatSignedPHP(signed)}
-                  </span>
-                  {r.autoPost ? (
-                    <span className="flex-none text-[10px] font-semibold uppercase tracking-wider text-dim">
-                      Auto
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => postRecurringNow(r.id)}
-                      className="flex-none rounded-pill border border-border px-2.5 py-1 text-xs font-semibold text-muted hover:text-text"
+                  Manage
+                </button>
+              </div>
+              <div className="overflow-hidden rounded-card border border-border bg-surface">
+                {upcoming.map((u, i) => {
+                  const r = u.rule
+                  const signed = r.type === 'income' ? Math.abs(r.amount) : -Math.abs(r.amount)
+                  const when =
+                    u.inDays < 0
+                      ? 'Overdue'
+                      : u.inDays === 0
+                        ? 'Today'
+                        : `in ${u.inDays} day${u.inDays === 1 ? '' : 's'}`
+                  return (
+                    <div
+                      key={`${r.id}-${u.date}`}
+                      className={`flex items-center gap-3 px-3.5 py-2.5 ${
+                        i > 0 ? 'border-t border-border' : ''
+                      }`}
                     >
-                      Add
-                    </button>
-                  )}
-                </div>
+                      <Repeat size={15} className="flex-none text-dim" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-text">
+                          {r.note || (r.type === 'income' ? 'Income' : 'Expense')}
+                        </p>
+                        <p className={`text-xs ${u.inDays < 0 ? 'text-warn' : 'text-dim'}`}>
+                          {when}
+                        </p>
+                      </div>
+                      <span
+                        className={`flex-none font-display text-sm font-bold tabular-nums ${
+                          r.type === 'income' ? 'text-pos' : 'text-neg'
+                        }`}
+                      >
+                        {hidden ? MASK : formatSignedPHP(signed)}
+                      </span>
+                      {r.autoPost ? (
+                        <span className="flex-none text-[10px] font-semibold uppercase tracking-wider text-dim">
+                          Auto
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => postRecurringNow(r.id)}
+                          className="flex-none rounded-pill border border-border px-2.5 py-1 text-xs font-semibold text-muted hover:text-text"
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <SectionTitle>Accounts</SectionTitle>
+              <button
+                onClick={() => setAddAccountOpen(true)}
+                className="inline-flex items-center gap-1 rounded-pill border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-text"
+              >
+                <Plus size={14} /> Add account
+              </button>
+            </div>
+
+            {accounts.length === 0 ? (
+              <EmptyState
+                title="No accounts yet"
+                hint="Add GCash, Maya, or any wallet to start tracking your net worth."
+                action={<Button onClick={() => setAddAccountOpen(true)}>Add your first account</Button>}
+              />
+            ) : shown.length === 0 ? (
+              <EmptyState
+                title={`No ${VIEW_LABEL[view].toLowerCase()} accounts`}
+                hint="Add one, or switch back to All."
+                action={<Button onClick={() => setAddAccountOpen(true)}>Add account</Button>}
+              />
+            ) : (
+              blocks.map((b, i) =>
+                b.kind === 'group' ? (
+                  <div key={`g-${b.bank}`} className="space-y-2">
+                    <Eyebrow>{b.bank}</Eyebrow>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {b.accounts.map((a) => (
+                        <AccountTile key={a.id} account={a} balance={accountBalance(a, txns)} />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={`s-${i}`} className="grid grid-cols-2 gap-2.5">
+                    {b.accounts.map((a) => (
+                      <AccountTile key={a.id} account={a} balance={accountBalance(a, txns)} />
+                    ))}
+                  </div>
+                ),
               )
-            })}
-          </div>
-        </section>
+            )}
+          </section>
+        </>
       )}
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <SectionTitle>Accounts</SectionTitle>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-1 rounded-pill border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-text"
-          >
-            <Plus size={14} /> Add
-          </button>
-        </div>
-
-        {accounts.length === 0 ? (
-          <EmptyState
-            title="No accounts yet"
-            hint="Add GCash, Maya, or any wallet to start tracking your net worth."
-            action={<Button onClick={() => setAddOpen(true)}>Add your first account</Button>}
-          />
-        ) : (
-          blocks.map((b, i) =>
-            b.kind === 'group' ? (
-              <div key={`g-${b.bank}`} className="space-y-2">
-                <Eyebrow>{b.bank}</Eyebrow>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {b.accounts.map((a) => (
-                    <AccountTile key={a.id} account={a} balance={accountBalance(a, txns)} />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div key={`s-${i}`} className="grid grid-cols-2 gap-2.5">
-                {b.accounts.map((a) => (
-                  <AccountTile key={a.id} account={a} balance={accountBalance(a, txns)} />
-                ))}
-              </div>
-            ),
-          )
-        )}
-      </section>
-
-      {/* Goals live below accounts and mirror the Accounts section: up to 3 here,
-          the rest behind "See all". New users add accounts first, so gate the
-          whole section on having at least one account. */}
-      {accounts.length > 0 && (
+      {/* ---- Goals view (was the bottom section) ---- */}
+      {view === 'goals' && (
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <SectionTitle>Goals</SectionTitle>
-            {goals.length > 0 && (
-              <Link to="/goals" className="text-xs font-semibold text-accent hover:underline">
-                See all
-              </Link>
-            )}
+            <button
+              onClick={() => setAddGoalOpen(true)}
+              className="inline-flex items-center gap-1 rounded-pill border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-text"
+            >
+              <Plus size={14} /> Add goal
+            </button>
           </div>
 
           {goals.length === 0 ? (
-            <Link
-              to="/goals"
-              className="grid place-items-center rounded-card border border-dashed border-border p-3.5 text-center text-xs text-muted"
-            >
-              + Add a savings goal
-            </Link>
+            <EmptyState
+              title="No goals yet"
+              hint="Save toward an emergency fund, a trip, or a new phone — track progress here."
+              action={<Button onClick={() => setAddGoalOpen(true)}>Add a goal</Button>}
+            />
           ) : (
             <div className="space-y-2.5">
-              {goals.slice(0, 3).map((goal) => (
+              {goals.map((goal) => (
                 <GoalRow key={goal.id} goal={goal} accounts={accounts} txns={txns} />
               ))}
             </div>
@@ -314,8 +349,52 @@ export default function Dashboard() {
         </section>
       )}
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add account">
-        <AccountForm onDone={() => setAddOpen(false)} />
+      {/* ---- Budget view ---- */}
+      {view === 'budget' && (
+        <section className="space-y-5">
+          <div className="flex items-center justify-between">
+            <SectionTitle>Budget</SectionTitle>
+            <button
+              onClick={() => setEditBudgetOpen(true)}
+              className="inline-flex items-center gap-1 rounded-pill border border-border px-3 py-1.5 text-xs font-semibold text-muted hover:text-text"
+            >
+              <Plus size={14} /> {monthlyCap != null ? 'Edit budget' : 'Set budget'}
+            </button>
+          </div>
+
+          <BudgetSummary month={thisMonth} />
+
+          <button
+            onClick={() => setRecurringOpen(true)}
+            className="flex w-full items-center justify-between rounded-card border border-border bg-surface px-3.5 py-3 text-sm font-medium"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Repeat size={15} className="text-muted" /> Recurring &amp; bills
+            </span>
+            <span className="text-xs text-dim">{recurring.length}</span>
+          </button>
+        </section>
+      )}
+
+      <Modal open={addAccountOpen} onClose={() => setAddAccountOpen(false)} title="Add account">
+        <AccountForm onDone={() => setAddAccountOpen(false)} />
+      </Modal>
+      <Modal open={addGoalOpen} onClose={() => setAddGoalOpen(false)} title="Add goal">
+        <GoalForm accounts={accounts} onDone={() => setAddGoalOpen(false)} />
+      </Modal>
+      <Modal
+        open={editBudgetOpen}
+        onClose={() => setEditBudgetOpen(false)}
+        title={monthlyCap != null ? 'Edit monthly budget' : 'Set monthly budget'}
+      >
+        <MonthlyBudgetForm current={monthlyCap} onDone={() => setEditBudgetOpen(false)} />
+      </Modal>
+      <Modal
+        open={recurringOpen}
+        onClose={() => setRecurringOpen(false)}
+        title="Recurring & upcoming"
+      >
+        <RecurringManager />
       </Modal>
     </div>
   )

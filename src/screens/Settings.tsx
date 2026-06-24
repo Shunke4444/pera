@@ -51,6 +51,18 @@ export default function Settings() {
   const recurring = useRecurring()
   const [msg, setMsg] = useState('')
   const [theme, setThemeState] = useState<Theme>(getStoredTheme())
+  const [showArchived, setShowArchived] = useState(
+    () => localStorage.getItem('pera-show-archived') === '1',
+  )
+
+  const archivedCount = accounts.filter((a) => a.archived).length
+  const shownAccounts = accounts.filter((a) => showArchived || !a.archived)
+
+  const toggleShowArchived = () => {
+    const next = !showArchived
+    setShowArchived(next)
+    localStorage.setItem('pera-show-archived', next ? '1' : '0')
+  }
 
   const exportJSON = async () => {
     const data = await exportData()
@@ -128,15 +140,25 @@ export default function Settings() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <Eyebrow>Accounts</Eyebrow>
-          <button
-            onClick={() => setAdding(true)}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-accent"
-          >
-            <Plus size={14} /> Add
-          </button>
+          <div className="flex items-center gap-3">
+            {archivedCount > 0 && (
+              <button
+                onClick={toggleShowArchived}
+                className="text-xs font-semibold text-muted hover:text-text"
+              >
+                {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
+              </button>
+            )}
+            <button
+              onClick={() => setAdding(true)}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-accent"
+            >
+              <Plus size={14} /> Add
+            </button>
+          </div>
         </div>
         <div className="overflow-hidden rounded-card border border-border bg-surface">
-          {accounts.map((a, i) => (
+          {shownAccounts.map((a, i) => (
             <div
               key={a.id}
               className={`flex items-center gap-3 px-3.5 py-3 ${

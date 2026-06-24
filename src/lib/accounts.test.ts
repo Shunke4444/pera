@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { presentTypes, filterAccountsByType, TYPE_LABEL } from './accounts'
+import {
+  presentTypes,
+  filterAccountsByType,
+  TYPE_LABEL,
+  homeViews,
+  resolveHomeView,
+  isAccountView,
+  VIEW_LABEL,
+} from './accounts'
 import type { Account, AccountType } from '../db/types'
 
 function acct(id: string, type: AccountType): Account {
@@ -58,5 +66,47 @@ describe('TYPE_LABEL', () => {
   it('has a human label for every account type', () => {
     const types: AccountType[] = ['ewallet', 'savings', 'checking', 'credit', 'cash', 'investment']
     for (const t of types) expect(TYPE_LABEL[t]).toBeTruthy()
+  })
+})
+
+describe('homeViews', () => {
+  it('is All + present types + Goals + Budget, in order', () => {
+    const accts = [acct('a', 'cash'), acct('b', 'ewallet')]
+    expect(homeViews(accts)).toEqual(['all', 'ewallet', 'cash', 'goals', 'budget'])
+  })
+
+  it('still offers All/Goals/Budget with no accounts', () => {
+    expect(homeViews([])).toEqual(['all', 'goals', 'budget'])
+  })
+
+  it('has a label for every view it can emit', () => {
+    for (const v of homeViews([acct('a', 'savings')])) expect(VIEW_LABEL[v]).toBeTruthy()
+  })
+})
+
+describe('resolveHomeView', () => {
+  const accts = [acct('a', 'ewallet')]
+
+  it('keeps a stored view that is still available', () => {
+    expect(resolveHomeView('budget', accts)).toBe('budget')
+    expect(resolveHomeView('ewallet', accts)).toBe('ewallet')
+  })
+
+  it('falls back to all for a type whose accounts are gone', () => {
+    expect(resolveHomeView('savings', accts)).toBe('all')
+  })
+
+  it('falls back to all for null / junk', () => {
+    expect(resolveHomeView(null, accts)).toBe('all')
+    expect(resolveHomeView('nonsense', accts)).toBe('all')
+  })
+})
+
+describe('isAccountView', () => {
+  it('is true for all + concrete types, false for goals/budget', () => {
+    expect(isAccountView('all')).toBe(true)
+    expect(isAccountView('savings')).toBe(true)
+    expect(isAccountView('goals')).toBe(false)
+    expect(isAccountView('budget')).toBe(false)
   })
 })

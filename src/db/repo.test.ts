@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { db } from './db'
 import {
   addAccount,
+  deleteAccount,
+  addRecurring,
   addTransaction,
   addTransfer,
   deleteTransaction,
@@ -77,6 +79,50 @@ describe('deleteTransaction on a transfer leg', () => {
     await addTransaction({ accountId: a, amount: -250, type: 'expense', date: Date.now() })
     await deleteTransaction(id)
     expect(await db.transactions.count()).toBe(1)
+  })
+})
+
+describe('deleteAccount', () => {
+  it('removes the account, its transactions, and its recurring rules — leaving others intact', async () => {
+    const { a, b } = await twoAccounts() // a opening 10000, b opening 0
+    // a: a plain expense + a recurring rule; b: a plain expense that must survive.
+    await addTransaction({ accountId: a, amount: -500, type: 'expense', date: Date.now() })
+    await addRecurring({
+      accountId: a,
+      type: 'expense',
+      amount: 1000,
+      freq: 'monthly',
+      interval: 1,
+      startDate: Date.now(),
+      autoPost: false,
+    })
+    await addTransaction({ accountId: b, amount: -250, type: 'expense', date: Date.now() })
+
+    await deleteAccount(a)
+
+    expect(await db.accounts.get(a)).toBeUndefined()
+    expect(await db.transactions.where('accountId').equals(a).count()).toBe(0)
+    expect(await db.recurring.where('accountId').equals(a).count()).toBe(0)
+    // b is untouched.
+    expect(await db.accounts.get(b)).toBeDefined()
+    expect(await db.transactions.where('accountId').equals(b).count()).toBe(1)
+
+    // Net worth no longer counts the deleted account.
+    const accounts = await db.accounts.toArray()
+    const txns = await db.transactions.toArray()
+    expect(netWorth(accounts, txns)).toBe(-250) // only b: opening 0 - 250
+  })
+
+  it('also deletes BOTH legs of a transfer that touched the account', async () => {
+    const { a, b } = await twoAccounts()
+    await addTransfer({ fromAccountId: a, toAccountId: b, amount: 3000, date: Date.now() })
+    expect(await db.transactions.count()).toBe(2)
+
+    await deleteAccount(a)
+
+    // Deleting `a` removes its leg; the surviving leg on `b` is harmless history,
+    // but the account `a` and every txn filed under it are gone.
+    expect(await db.transactions.where('accountId').equals(a).count()).toBe(0)
   })
 })
 
