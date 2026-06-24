@@ -4,4 +4,6 @@
     <string name="title_activity_main">Pera</string>
     <string name="package_name">app.pera.tracker</string>
     <string name="custom_url_scheme">app.pera.tracker</string>
+    <string name="widget_label">Pera</string>
+    <string name="widget_description">Net worth, monthly budget, and quick add buttons.</string>
 </resources>

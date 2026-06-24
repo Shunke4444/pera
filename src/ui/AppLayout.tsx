@@ -14,6 +14,7 @@ import {
 import { applyTheme, getStoredTheme, resolveTheme, type Resolved } from '../theme'
 import { setThemePref } from '../db/repo'
 import AddTransactionSheet from '../components/AddTransactionSheet'
+import SnapshotPublisher from '../native/SnapshotPublisher'
 
 const TABS = [
   { to: '/', label: 'Home', Icon: Home },
@@ -102,6 +103,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </nav>
 
       <AddTransactionSheet open={addOpen} onClose={() => setAddOpen(false)} />
+      <SnapshotPublisher />
     </div>
   )
 }

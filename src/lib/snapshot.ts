@@ -5,6 +5,7 @@
 // P3 augments publishSnapshot() to also write it to native shared storage via
 // @capacitor/preferences and to poke the widget to refresh.
 
+import { Capacitor } from '@capacitor/core'
 import { db } from '../db/db'
 import { netWorth, overallSpent, accountBalance, monthKey } from './balances'
 
@@ -68,9 +69,22 @@ export async function publishSnapshot(): Promise<void> {
 }
 
 /**
- * Native sink for the snapshot. No-op on the web; P3 swaps in
- * @capacitor/preferences + a widget-refresh poke once Capacitor is installed.
+ * Native sink for the snapshot: write it to @capacitor/preferences (which the
+ * Glance widget reads from SharedPreferences) and poke the widget to refresh.
+ * No-op on the web. Best-effort — never throws.
  */
-async function writeNative(_json: string): Promise<void> {
-  /* P3: Preferences.set({ key: SNAPSHOT_KEY, value: _json }) + widget refresh */
+async function writeNative(json: string): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  try {
+    const { Preferences } = await import('@capacitor/preferences')
+    await Preferences.set({ key: SNAPSHOT_KEY, value: json })
+  } catch {
+    /* preferences unavailable — skip */
+  }
+  try {
+    const { WidgetBridge } = await import('../native/widget')
+    await WidgetBridge.refresh()
+  } catch {
+    /* no widgets placed / plugin missing — fine */
+  }
 }
