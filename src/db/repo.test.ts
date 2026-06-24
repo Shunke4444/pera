@@ -23,7 +23,11 @@ import {
   addBudget,
   addCategory,
   deleteCategory,
+  drainPendingTxns,
+  upsertPreset,
+  deletePreset,
 } from './repo'
+import type { PendingTxn } from '../lib/pending'
 import { seedIfEmpty } from './seed'
 import { accountBalance, netWorth, goalProgress } from '../lib/balances'
 import type { ParsedRow } from '../lib/importing'
@@ -376,5 +380,50 @@ describe('backup export / import round-trip', () => {
     // Restore is the recovery path — a bad file must never empty the live DB.
     expect(await db.accounts.count()).toBe(accountsBefore)
     expect(await db.transactions.count()).toBe(txnsBefore)
+  })
+})
+
+describe('drainPendingTxns — idempotent by pending id (integration)', () => {
+  const pending: PendingTxn[] = [
+    { id: 'pend-1', accountId: 'gcash', amount: -10000, type: 'expense', date: 1_700_000_000_000 },
+    { id: 'pend-2', accountId: 'gcash', amount: 5000, type: 'income', date: 1_700_000_100_000 },
+  ]
+
+  it('imports each pending once, even when the same queue is drained twice', async () => {
+    const first = await drainPendingTxns(pending)
+    expect(first).toBe(2)
+
+    // Re-draining the SAME batch (queue not cleared / app reopened) adds nothing.
+    const second = await drainPendingTxns(pending)
+    expect(second).toBe(0)
+
+    const rows = await db.transactions.toArray()
+    const drained = rows.filter((t) => t.pendingId)
+    expect(drained).toHaveLength(2)
+    expect(drained.map((t) => t.pendingId).sort()).toEqual(['pend-1', 'pend-2'])
+    // The expense kept its negative sign; the income stayed positive.
+    expect(drained.find((t) => t.pendingId === 'pend-1')!.amount).toBe(-10000)
+    expect(drained.find((t) => t.pendingId === 'pend-2')!.amount).toBe(5000)
+  })
+})
+
+describe('quick-add presets', () => {
+  it('upserts (insert then replace by id) and deletes presets in settings', async () => {
+    await seedIfEmpty() // settings singleton must exist for update() to land
+    await db.settings.update('singleton', { quickAddPresets: [] }) // ignore seed defaults
+    await upsertPreset({ id: 'p1', label: 'Food', amount: 10000, type: 'expense' })
+    await upsertPreset({ id: 'p2', label: 'Jeep', amount: 1300, type: 'expense' })
+    let s = await db.settings.get('singleton')
+    expect(s?.quickAddPresets?.map((p) => p.id)).toEqual(['p1', 'p2'])
+
+    // Same id replaces in place, doesn't duplicate.
+    await upsertPreset({ id: 'p1', label: 'Lunch', amount: 15000, type: 'expense' })
+    s = await db.settings.get('singleton')
+    expect(s?.quickAddPresets).toHaveLength(2)
+    expect(s?.quickAddPresets?.find((p) => p.id === 'p1')?.label).toBe('Lunch')
+
+    await deletePreset('p1')
+    s = await db.settings.get('singleton')
+    expect(s?.quickAddPresets?.map((p) => p.id)).toEqual(['p2'])
   })
 })

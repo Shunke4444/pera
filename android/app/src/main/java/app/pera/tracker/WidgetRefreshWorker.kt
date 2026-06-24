@@ -1,7 +1,6 @@
 package app.pera.tracker
 
 import android.content.Context
-import androidx.glance.appwidget.updateAll
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -9,7 +8,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 
-/** Periodic fallback so the widget never goes very stale (the live path is the
+/** Periodic fallback so the widgets never go very stale (the live path is the
  *  in-app snapshot publisher + WidgetBridge.refresh). */
 class WidgetRefreshWorker(
     appContext: Context,
@@ -17,7 +16,7 @@ class WidgetRefreshWorker(
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         return try {
-            PeraWidget().updateAll(applicationContext)
+            refreshAllWidgets(applicationContext)
             Result.success()
         } catch (_: Throwable) {
             Result.success()

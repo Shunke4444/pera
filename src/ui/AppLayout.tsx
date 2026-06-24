@@ -15,6 +15,7 @@ import { applyTheme, getStoredTheme, resolveTheme, type Resolved } from '../them
 import { setThemePref } from '../db/repo'
 import AddTransactionSheet from '../components/AddTransactionSheet'
 import SnapshotPublisher from '../native/SnapshotPublisher'
+import { isPopup } from '../native/popup'
 
 const TABS = [
   { to: '/', label: 'Home', Icon: Home },
@@ -41,6 +42,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     // Persist to the settings singleton too, so the DB-backed pref (used by
     // export) can't drift from what's actually painted. Matches Settings.tsx.
     void setThemePref(next)
+  }
+
+  // Pop-up window (native quick-add dialog): render the bare card only — no
+  // header, tab bar, FAB or add-sheet — so it reads as a small floating window.
+  if (isPopup()) {
+    return (
+      <div className="mx-auto min-h-full max-w-sm px-5 py-5">{children}</div>
+    )
   }
 
   return (

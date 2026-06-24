@@ -1,6 +1,5 @@
 package app.pera.tracker
 
-import androidx.glance.appwidget.updateAll
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
@@ -10,9 +9,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * JS-callable bridge: WidgetBridge.refresh() forces every Pera widget to
- * recompose from the freshly published snapshot. Called by the web app right
- * after it writes the snapshot to Preferences (a save / app start).
+ * JS-callable bridge:
+ *  - WidgetBridge.refresh()      → recompose every Pera widget from the freshly
+ *    published snapshot (called right after the web app writes it).
+ *  - WidgetBridge.dismissPopup() → finish the quick-add pop-up Activity (called
+ *    by the web quick-add after a save when running in popup mode).
  */
 @CapacitorPlugin(name = "WidgetBridge")
 class WidgetBridgePlugin : Plugin() {
@@ -21,11 +22,18 @@ class WidgetBridgePlugin : Plugin() {
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.Default).launch {
             try {
-                PeraWidget().updateAll(appContext)
+                refreshAllWidgets(appContext)
             } catch (_: Throwable) {
                 /* no widgets placed / transient — ignore */
             }
         }
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun dismissPopup(call: PluginCall) {
+        val act = activity
+        act?.runOnUiThread { act.finish() }
         call.resolve()
     }
 }

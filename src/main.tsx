@@ -5,7 +5,7 @@ import App from './App'
 import ErrorBoundary from './ui/ErrorBoundary'
 import './index.css'
 import { seedIfEmpty } from './db/seed'
-import { processDueRecurring } from './db/repo'
+import { processDueRecurring, drainPendingQueue } from './db/repo'
 import { applyTheme, getStoredTheme } from './theme'
 import { publishSnapshot } from './lib/snapshot'
 import { initDeepLinks } from './native/deepLink'
@@ -15,9 +15,11 @@ applyTheme(getStoredTheme())
 
 // First-run seed (4 accounts, default categories, settings). Idempotent.
 // Then catch up any due recurring rules (also idempotent — safe every start),
-// and publish the widget snapshot once the data is settled.
+// drain any pending widget preset-logs into IndexedDB (idempotent by pending
+// id), and finally publish the true widget snapshot once the data is settled.
 void seedIfEmpty()
   .then(() => processDueRecurring())
+  .then(() => drainPendingQueue())
   .then(() => publishSnapshot())
 
 // Route widget deep links (pera://quick-add?...) into the app. No-op on web.

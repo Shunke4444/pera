@@ -6,6 +6,7 @@ import { addTransaction, addCategory } from '../db/repo'
 import { parseMajorInput } from '../lib/money'
 import { parseQuickAddParams, type QuickAddType } from '../lib/quickAdd'
 import { publishSnapshot } from '../lib/snapshot'
+import { isPopup, dismissPopup } from '../native/popup'
 import { Button, Field, Input } from '../ui/form'
 import { Dot, SectionTitle } from '../ui/common'
 import type { Category } from '../db/types'
@@ -34,6 +35,10 @@ export default function QuickAdd() {
 
   // Parse the deep-link query ONCE per distinct search string (cold-launch safe).
   const params = useMemo(() => parseQuickAddParams(search), [search])
+  // Running inside the native pop-up window? Then dismiss (finish the Activity)
+  // after a save instead of routing home, and skip the in-app "go home" links.
+  const popup = useMemo(() => isPopup(), [])
+  const close = () => (popup ? void dismissPopup() : navigate('/'))
 
   const [type, setType] = useState<QuickAddType>(params.type)
   const [amount, setAmount] = useState(params.amount ?? '')
@@ -118,7 +123,9 @@ export default function QuickAdd() {
       // Refresh the native widget snapshot after the write (no-op on web).
       void publishSnapshot()
       setSaved(true)
-      setTimeout(() => navigate('/', { replace: true }), 650)
+      // In the pop-up, close the floating window; otherwise route home.
+      if (popup) setTimeout(() => void dismissPopup(), 450)
+      else setTimeout(() => navigate('/', { replace: true }), 650)
     } catch (e) {
       setErr(`Couldn't save — ${e instanceof Error ? e.message : 'please try again.'}`)
     }
@@ -142,8 +149,8 @@ export default function QuickAdd() {
       <div className="space-y-3">
         <SectionTitle>Quick add</SectionTitle>
         <p className="text-sm text-muted">Add an account first, then capture transactions.</p>
-        <Button variant="ghost" onClick={() => navigate('/')}>
-          Go home
+        <Button variant="ghost" onClick={close}>
+          {popup ? 'Close' : 'Go home'}
         </Button>
       </div>
     )
@@ -255,7 +262,7 @@ export default function QuickAdd() {
         <Button onClick={save} className="flex-1">
           Save {type}
         </Button>
-        <Button variant="ghost" onClick={() => navigate('/')}>
+        <Button variant="ghost" onClick={close}>
           Cancel
         </Button>
       </div>

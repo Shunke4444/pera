@@ -4,6 +4,14 @@
     <string name="title_activity_main">Pera</string>
     <string name="package_name">app.pera.tracker</string>
     <string name="custom_url_scheme">app.pera.tracker</string>
-    <string name="widget_label">Pera</string>
-    <string name="widget_description">Net worth, monthly budget, and quick add buttons.</string>
+
+    <!-- Home-screen widgets -->
+    <string name="budget_widget_label">Pera · Budget</string>
+    <string name="budget_widget_description">This month\'s budget with quick-log buttons.</string>
+    <string name="networth_widget_label">Pera · Net worth</string>
+    <string name="networth_widget_description">Net worth + budget with quick-log buttons.</string>
+    <string name="goals_widget_label">Pera · Goal</string>
+    <string name="goals_widget_description">Top savings-goal progress.</string>
+    <string name="activity_widget_label">Pera · Activity</string>
+    <string name="activity_widget_description">Your latest transactions.</string>
 </resources>

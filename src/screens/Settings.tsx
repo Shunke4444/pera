@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import {
   Pencil,
   Archive,
@@ -11,6 +12,7 @@ import {
   FileSpreadsheet,
   Trash2,
   Smartphone,
+  LayoutGrid,
 } from 'lucide-react'
 import { useAllAccounts, useTransactions, useCategories, useSettings } from '../hooks'
 import { useInstallPrompt } from '../hooks/useInstallPrompt'
@@ -34,6 +36,7 @@ import Modal from '../ui/Modal'
 import AccountForm from '../components/AccountForm'
 import CategoryManager from '../components/CategoryManager'
 import RecurringManager from '../components/RecurringManager'
+import PresetManager from '../components/PresetManager'
 import { useRecurring } from '../hooks'
 import { Button, Select } from '../ui/form'
 import { Dot, Eyebrow, SectionTitle } from '../ui/common'
@@ -48,7 +51,10 @@ export default function Settings() {
   const [adding, setAdding] = useState(false)
   const [managingCats, setManagingCats] = useState(false)
   const [managingRecurring, setManagingRecurring] = useState(false)
+  const [managingPresets, setManagingPresets] = useState(false)
   const recurring = useRecurring()
+  const isNative = Capacitor.isNativePlatform()
+  const presetCount = settings?.quickAddPresets?.length ?? 0
   const [msg, setMsg] = useState('')
   const [theme, setThemeState] = useState<Theme>(getStoredTheme())
   const [showArchived, setShowArchived] = useState(
@@ -218,6 +224,33 @@ export default function Settings() {
               ))}
           </Select>
         </label>
+
+        {/* Home-screen widget presets — one-tap log buttons. */}
+        <button
+          onClick={() => setManagingPresets(true)}
+          className="flex w-full items-center justify-between rounded-card border border-border bg-surface px-3.5 py-3 text-sm font-medium"
+        >
+          <span className="inline-flex items-center gap-2">
+            <LayoutGrid size={15} className="text-muted" /> Widget quick-add presets
+          </span>
+          <span className="text-xs text-dim">{presetCount}</span>
+        </button>
+
+        {isNative && (
+          <div className="rounded-card border border-warn/40 bg-surface px-3.5 py-3">
+            <p className="text-sm font-medium text-text">Xiaomi / MIUI / HyperOS</p>
+            <p className="mt-1 text-xs text-muted">
+              So the widget pop-up and instant preset-logging can open while Pera is closed,
+              enable these once in Android Settings → Apps → Pera → Permissions:
+            </p>
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-xs text-muted">
+              <li>“Display pop-up windows while running in background”</li>
+              <li>“Start in background” / Autostart</li>
+              <li>Battery saver → “No restrictions”</li>
+            </ul>
+          </div>
+        )}
+
         <div className="rounded-card border border-border bg-surface px-3.5 py-3">
           <p className="text-sm font-medium text-text">Quick add on iPhone</p>
           <p className="mt-1 text-xs text-muted">
@@ -343,6 +376,13 @@ export default function Settings() {
         title="Recurring & upcoming"
       >
         <RecurringManager />
+      </Modal>
+      <Modal
+        open={managingPresets}
+        onClose={() => setManagingPresets(false)}
+        title="Widget quick-add presets"
+      >
+        <PresetManager />
       </Modal>
     </div>
   )

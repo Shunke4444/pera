@@ -47,6 +47,18 @@ const seedSettings: Settings = {
   id: 'singleton',
   baseCurrency: 'PHP',
   theme: 'system',
+  // A couple of common one-tap widget presets (account resolves to default/first
+  // at publish time). Users edit these in Settings → Quick-add presets.
+  quickAddPresets: [
+    { id: 'preset-food', label: 'Food ₱100', amount: 10000, type: 'expense', categoryId: 'food' },
+    {
+      id: 'preset-transport',
+      label: 'Jeep ₱13',
+      amount: 1300,
+      type: 'expense',
+      categoryId: 'transport',
+    },
+  ],
 }
 
 /**

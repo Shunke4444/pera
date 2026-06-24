@@ -48,6 +48,7 @@ export interface Transaction {
   importBatchId?: string
   importHash?: string
   recurringId?: string // the recurring rule that generated this txn (trace + dedupe)
+  pendingId?: string // id of the native widget pending-log this txn was drained from (dedupe)
   createdAt: number
   updatedAt: number
 }
@@ -112,4 +113,20 @@ export interface Settings {
   lastBackupAt?: number
   monthlyBudget?: number // overall cap on total monthly spend, minor units; undefined = not set
   defaultAccountId?: string // account quick-add posts to by default; undefined = first account
+  quickAddPresets?: QuickAddPreset[] // home-screen widget instant-log buttons
+}
+
+/**
+ * A one-tap "log this" button shown on the native widget. `amount` is a positive
+ * minor-unit magnitude; `type` decides the sign. `accountId`/`categoryId` are
+ * optional — when an account isn't pinned the snapshot resolves it to the
+ * default (or first) account so the native side always has a concrete target.
+ */
+export interface QuickAddPreset {
+  id: string
+  label: string
+  amount: number // positive minor-unit magnitude
+  type: 'expense' | 'income'
+  categoryId?: string
+  accountId?: string
 }
