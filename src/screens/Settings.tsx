@@ -23,6 +23,7 @@ import {
   clearAllData,
   markBackedUp,
   setThemePref,
+  setDefaultAccount,
 } from '../db/repo'
 import { seedIfEmpty } from '../db/seed'
 import { transactionsToCSV, daysSinceBackup } from '../lib/backup'
@@ -34,7 +35,7 @@ import AccountForm from '../components/AccountForm'
 import CategoryManager from '../components/CategoryManager'
 import RecurringManager from '../components/RecurringManager'
 import { useRecurring } from '../hooks'
-import { Button } from '../ui/form'
+import { Button, Select } from '../ui/form'
 import { Dot, Eyebrow, SectionTitle } from '../ui/common'
 
 export default function Settings() {
@@ -170,6 +171,56 @@ export default function Settings() {
               </button>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Quick add */}
+      <section className="space-y-2">
+        <Eyebrow>Quick add</Eyebrow>
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">Default account for quick add</span>
+          <Select
+            value={settings?.defaultAccountId ?? ''}
+            onChange={(e) => {
+              void setDefaultAccount(e.target.value || undefined)
+              setMsg('Default quick-add account saved.')
+            }}
+          >
+            <option value="">First account</option>
+            {accounts
+              .filter((a) => !a.archived)
+              .map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </Select>
+        </label>
+        <div className="rounded-card border border-border bg-surface px-3.5 py-3">
+          <p className="text-sm font-medium text-text">Quick add on iPhone</p>
+          <p className="mt-1 text-xs text-muted">
+            iOS has no app-icon shortcuts. Make an Apple Shortcut (“Open URL”) with one of these,
+            then add it to the Home Screen or bind it to Back Tap:
+          </p>
+          {(['expense', 'income'] as const).map((t) => {
+            const url = `${window.location.origin}/#/quick-add?type=${t}`
+            return (
+              <div key={t} className="mt-2 flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded-tile border border-border bg-surface-2 px-2 py-1.5 text-[11px] text-muted">
+                  {url}
+                </code>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(url)
+                    setMsg(`Copied ${t} quick-add link.`)
+                  }}
+                  className="flex-none text-xs font-semibold text-accent"
+                >
+                  Copy
+                </button>
+              </div>
+            )
+          })}
         </div>
       </section>
 

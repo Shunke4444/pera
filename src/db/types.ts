@@ -111,4 +111,5 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark'
   lastBackupAt?: number
   monthlyBudget?: number // overall cap on total monthly spend, minor units; undefined = not set
+  defaultAccountId?: string // account quick-add posts to by default; undefined = first account
 }

@@ -20,6 +20,22 @@ export default defineConfig({
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+        ],
+        // Long-press the installed icon (Android PWA) → fast capture. HashRouter,
+        // so deep links MUST use the /#/ form to cold-launch the route.
+        shortcuts: [
+          {
+            name: 'Add expense',
+            short_name: 'Expense',
+            url: '/#/quick-add?type=expense',
+            icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }]
+          },
+          {
+            name: 'Add income',
+            short_name: 'Income',
+            url: '/#/quick-add?type=income',
+            icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }]
+          }
         ]
       }
     })

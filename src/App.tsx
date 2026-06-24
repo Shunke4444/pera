@@ -7,6 +7,7 @@ import Settings from './screens/Settings'
 import Activity from './screens/Activity'
 import Budgets from './screens/Budgets'
 import Goals from './screens/Goals'
+import QuickAdd from './screens/QuickAdd'
 import { Loading } from './ui/common'
 
 // Heavy screens (Recharts / SheetJS / pdfjs) are split out so the initial
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/activity" element={<Activity />} />
           <Route path="/budgets" element={<Budgets />} />
           <Route path="/goals" element={<Goals />} />
+          <Route path="/quick-add" element={<QuickAdd />} />
           <Route path="/insights" element={<Insights />} />
           <Route path="/import" element={<Import />} />
           <Route path="/settings" element={<Settings />} />
