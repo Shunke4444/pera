@@ -188,4 +188,49 @@ describe('buildSnapshotData — v2 shape', () => {
     expect(snap.presets[0]).toMatchObject({ id: 'pr1', label: 'Food', accountId: 'maya' }) // default
     expect(snap.presets[1]).toMatchObject({ id: 'pr2', accountId: 'gcash' }) // explicit
   })
+
+  it('publishes account + category lists and the default account for the native dialog', () => {
+    const settings: Settings = {
+      id: 'singleton',
+      baseCurrency: 'PHP',
+      theme: 'system',
+      defaultAccountId: 'maya',
+    }
+    const snap = buildSnapshotData({
+      accounts: [
+        ACCT({ id: 'gcash', name: 'GCash', color: '#3B82F6' }),
+        ACCT({ id: 'maya', name: 'Maya', color: '#22C55E' }),
+        ACCT({ id: 'old', name: 'Old', archived: true }), // excluded — archived
+      ],
+      txns: [],
+      categories: [
+        CAT('food', 'Food', '#f00'),
+        { id: 'pay', name: 'Salary', kind: 'income', color: '#0f0' },
+      ],
+      budgets: [],
+      goals: [],
+      settings,
+      nowMs: NOW,
+    })
+    // Only visible accounts, id + name + color.
+    expect(snap.accounts.map((a) => a.id)).toEqual(['gcash', 'maya'])
+    expect(snap.accounts[0]).toMatchObject({ id: 'gcash', name: 'GCash', color: '#3B82F6' })
+    // Both kinds of category flow through with their kind.
+    expect(snap.categories).toHaveLength(2)
+    expect(snap.categories.find((c) => c.id === 'pay')).toMatchObject({ kind: 'income', name: 'Salary' })
+    expect(snap.defaultAccountId).toBe('maya')
+  })
+
+  it('defaults the dialog account to the first visible account when none is set', () => {
+    const snap = buildSnapshotData({
+      accounts: [ACCT({ id: 'first' }), ACCT({ id: 'second' })],
+      txns: [],
+      categories: [],
+      budgets: [],
+      goals: [],
+      settings: { id: 'singleton', baseCurrency: 'PHP', theme: 'system' },
+      nowMs: NOW,
+    })
+    expect(snap.defaultAccountId).toBe('first')
+  })
 })

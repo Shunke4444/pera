@@ -30,4 +30,13 @@
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:backgroundDimEnabled">true</item>
     </style>
+
+    <!-- Native quick-add dialog: a fully translucent, borderless window so the
+         Compose content paints its own scrim + card. QuickAddNativeActivity is a
+         plain ComponentActivity (not AppCompat), so it uses a platform theme. -->
+    <style name="AppTheme.NativeDialog" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
 </resources>

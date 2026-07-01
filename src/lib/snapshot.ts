@@ -63,6 +63,22 @@ export interface SnapshotPreset {
   accountId: string // resolved to a concrete account (preset → default → first)
 }
 
+// The native quick-add dialog (no webview) needs the account + category lists to
+// render its chips; they aren't in IndexedDB reach from Kotlin, so they ride the
+// snapshot like everything else. Tiny text — a handful of rows.
+export interface SnapshotAccount {
+  id: string
+  name: string
+  color?: string
+}
+
+export interface SnapshotCategory {
+  id: string
+  name: string
+  kind: 'income' | 'expense'
+  color: string
+}
+
 export interface WidgetSnapshot {
   netWorth: number // minor units
   assets: number // minor units (Σ positive balances)
@@ -73,6 +89,9 @@ export interface WidgetSnapshot {
   goals: SnapshotGoal[]
   recent: SnapshotRecent[]
   presets: SnapshotPreset[]
+  accounts: SnapshotAccount[] // visible accounts (native quick-add dialog chips)
+  categories: SnapshotCategory[] // expense + income categories (dialog chips)
+  defaultAccountId?: string // account the dialog preselects (default → first)
   topAccount?: { name: string; balance: number } // richest visible account
 }
 
@@ -131,6 +150,14 @@ export function buildSnapshotData(input: SnapshotInput): WidgetSnapshot {
     goals: buildGoals(goals, txns, visible),
     recent: buildRecent(txns, categories),
     presets: buildPresets(settings, visible),
+    accounts: visible.map((a) => ({ id: a.id, name: a.name, color: a.color })),
+    categories: categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      color: c.color,
+    })),
+    defaultAccountId: settings?.defaultAccountId ?? visible[0]?.id,
     topAccount,
   }
 }

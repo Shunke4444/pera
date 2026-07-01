@@ -19,4 +19,11 @@ ext {
     workVersion = '2.9.1'
     coroutinesVersion = '1.8.1'
     coreKtxVersion = '1.17.0'
+    // Native quick-add dialog (Jetpack Compose UI, not Glance). The BOM pins the
+    // ui/foundation/material3 versions together; activity-compose is versioned
+    // separately (androidx.activity group) and kept in the same era as the BOM.
+    // The Compose compiler comes from the org.jetbrains.kotlin.plugin.compose
+    // plugin (see root build.gradle).
+    composeBomVersion = '2024.09.00'
+    activityComposeVersion = '1.9.3'
 }

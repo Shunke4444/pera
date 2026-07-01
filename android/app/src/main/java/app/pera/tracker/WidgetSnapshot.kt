@@ -21,7 +21,9 @@ import java.util.Locale
  *     goals:   [{ name, color, pct, saved, target }],
  *     recent:  [{ date, label, signedAmount, type }],
  *     presets: [{ id, label, amount, type, categoryId?, accountId }],
- *     topAccount?: { name, balance } }
+ *     accounts:  [{ id, name, color? }],
+ *     categories:[{ id, name, kind, color }],
+ *     defaultAccountId?, topAccount?: { name, balance } }
  */
 data class WidgetSnapshot(
     val netWorth: Long,
@@ -33,6 +35,9 @@ data class WidgetSnapshot(
     val goals: List<GoalItem>,
     val recent: List<RecentItem>,
     val presets: List<Preset>,
+    val accounts: List<AccountItem>,
+    val categories: List<CategoryItem>,
+    val defaultAccountId: String?,
     val topAccountName: String?,
     val topAccountBalance: Long?,
     val hasData: Boolean,
@@ -54,6 +59,12 @@ data class WidgetSnapshot(
     data class TopCategory(val name: String, val color: String, val spent: Long, val cap: Long?)
     data class GoalItem(val name: String, val color: String, val pct: Double, val saved: Long, val target: Long)
     data class RecentItem(val date: Long, val label: String, val signedAmount: Long, val type: String)
+
+    /** An account chip for the native quick-add dialog. */
+    data class AccountItem(val id: String, val name: String, val color: String?)
+
+    /** A category chip for the native quick-add dialog (kind = expense | income). */
+    data class CategoryItem(val id: String, val name: String, val kind: String, val color: String)
     data class Preset(
         val id: String,
         val label: String,
@@ -97,6 +108,9 @@ data class WidgetSnapshot(
                 goals = parseGoals(o.optJSONArray("goals")),
                 recent = parseRecent(o.optJSONArray("recent")),
                 presets = parsePresets(o.optJSONArray("presets")),
+                accounts = parseAccounts(o.optJSONArray("accounts")),
+                categories = parseCategories(o.optJSONArray("categories")),
+                defaultAccountId = o.optString("defaultAccountId").ifEmpty { null },
                 topAccountName = top?.optString("name"),
                 topAccountBalance = top?.optLong("balance"),
                 hasData = true,
@@ -144,6 +158,31 @@ data class WidgetSnapshot(
                 )
             }
 
+        private fun parseAccounts(arr: JSONArray?): List<AccountItem> =
+            (0 until (arr?.length() ?: 0)).mapNotNull { i ->
+                val a = arr!!.getJSONObject(i)
+                val id = a.optString("id", "")
+                if (id.isEmpty()) return@mapNotNull null
+                AccountItem(
+                    id = id,
+                    name = a.optString("name", ""),
+                    color = if (a.isNull("color")) null else a.optString("color").ifEmpty { null },
+                )
+            }
+
+        private fun parseCategories(arr: JSONArray?): List<CategoryItem> =
+            (0 until (arr?.length() ?: 0)).mapNotNull { i ->
+                val c = arr!!.getJSONObject(i)
+                val id = c.optString("id", "")
+                if (id.isEmpty()) return@mapNotNull null
+                CategoryItem(
+                    id = id,
+                    name = c.optString("name", ""),
+                    kind = c.optString("kind", "expense"),
+                    color = c.optString("color", "#9AA0AA"),
+                )
+            }
+
         private fun parsePresets(arr: JSONArray?): List<Preset> =
             (0 until (arr?.length() ?: 0)).mapNotNull { i ->
                 val p = arr!!.getJSONObject(i)
@@ -169,6 +208,9 @@ data class WidgetSnapshot(
             goals = emptyList(),
             recent = emptyList(),
             presets = emptyList(),
+            accounts = emptyList(),
+            categories = emptyList(),
+            defaultAccountId = null,
             topAccountName = null,
             topAccountBalance = null,
             hasData = false,

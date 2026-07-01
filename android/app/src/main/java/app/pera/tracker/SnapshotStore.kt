@@ -1,21 +1,27 @@
 package app.pera.tracker
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Mutates the published snapshot in place so a preset tap reflects on the widget
+ * Mutates the published snapshot in place so a log reflects on the widgets
  * IMMEDIATELY, before the web app has run. This is an OPTIMISTIC estimate; the
  * next app launch drains the pending queue and republishes the true snapshot,
- * which overwrites this. We only touch the headline figures (net worth + the
- * monthly-budget line) — enough to feel instant without re-deriving everything.
+ * which overwrites this. We touch the headline figures (net worth + the
+ * monthly-budget line) AND prepend to recent[] so the Activity widget updates
+ * instantly too — enough to feel instant without re-deriving everything.
  */
 object SnapshotStore {
+    private const val MAX_RECENT = 5
+
     /**
      * Apply one logged transaction to the stored snapshot. `signedAmount` is
-     * signed minor units (expense negative, income positive).
+     * signed minor units (expense negative, income positive); `type` is
+     * "expense" | "income"; `label` is the row label shown on the Activity
+     * widget (falls back to the type name when blank).
      */
-    fun applyOptimisticLog(context: Context, signedAmount: Long, isExpense: Boolean) {
+    fun applyOptimisticLog(context: Context, signedAmount: Long, type: String, label: String?) {
         val prefs = context.getSharedPreferences(WidgetSnapshot.PREFS_FILE, Context.MODE_PRIVATE)
         val raw = prefs.getString(WidgetSnapshot.KEY, null) ?: return
         val o = try {
@@ -23,6 +29,7 @@ object SnapshotStore {
         } catch (_: Throwable) {
             return
         }
+        val isExpense = type == "expense"
 
         // Net worth moves by the signed amount (expense down, income up).
         o.put("netWorth", o.optLong("netWorth", 0L) + signedAmount)
@@ -44,7 +51,24 @@ object SnapshotStore {
             }
         }
 
-        o.put("updatedAt", System.currentTimeMillis())
+        // Prepend to recent[] (cap 5) so the Activity widget shows this log now,
+        // not only after the web republishes. The next real publish overwrites
+        // recent[] with the true, complete list.
+        val now = System.currentTimeMillis()
+        val item = JSONObject().apply {
+            put("date", now)
+            put("label", label?.takeIf { it.isNotBlank() } ?: if (isExpense) "Expense" else "Income")
+            put("signedAmount", signedAmount)
+            put("type", type)
+        }
+        val prev = o.optJSONArray("recent") ?: JSONArray()
+        val next = JSONArray().apply {
+            put(item)
+            for (i in 0 until minOf(prev.length(), MAX_RECENT - 1)) put(prev.getJSONObject(i))
+        }
+        o.put("recent", next)
+
+        o.put("updatedAt", now)
         prefs.edit().putString(WidgetSnapshot.KEY, o.toString()).apply()
     }
 }

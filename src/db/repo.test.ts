@@ -426,4 +426,26 @@ describe('quick-add presets', () => {
     s = await db.settings.get('singleton')
     expect(s?.quickAddPresets?.map((p) => p.id)).toEqual(['p2'])
   })
+
+  it('dedupes id-less presets by (type+amount+category+account), assigning an id', async () => {
+    await seedIfEmpty()
+    await db.settings.update('singleton', { quickAddPresets: [] })
+
+    // Two "Save as quick-add" taps on the SAME combo (no id) → one preset.
+    await upsertPreset({ label: 'Food ₱100', amount: 10000, type: 'expense', categoryId: 'c1', accountId: 'a1' })
+    await upsertPreset({ label: 'Food again', amount: 10000, type: 'expense', categoryId: 'c1', accountId: 'a1' })
+    let s = await db.settings.get('singleton')
+    expect(s?.quickAddPresets).toHaveLength(1)
+    // Kept a single entry, got a real id, and the label refreshed to the latest.
+    expect(s?.quickAddPresets?.[0].id).toBeTruthy()
+    expect(s?.quickAddPresets?.[0].label).toBe('Food again')
+
+    // Any differing tuple field is a distinct action → a new preset each time.
+    await upsertPreset({ label: '₱200', amount: 20000, type: 'expense', categoryId: 'c1', accountId: 'a1' }) // amount
+    await upsertPreset({ label: 'Salary', amount: 10000, type: 'income', categoryId: 'c1', accountId: 'a1' }) // type
+    await upsertPreset({ label: 'Other cat', amount: 10000, type: 'expense', categoryId: 'c2', accountId: 'a1' }) // category
+    await upsertPreset({ label: 'Other acct', amount: 10000, type: 'expense', categoryId: 'c1', accountId: 'a2' }) // account
+    s = await db.settings.get('singleton')
+    expect(s?.quickAddPresets).toHaveLength(5)
+  })
 })

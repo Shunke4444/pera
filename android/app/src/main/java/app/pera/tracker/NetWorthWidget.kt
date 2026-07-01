@@ -26,11 +26,11 @@ import androidx.glance.unit.ColorProvider
 class NetWorthWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val snap = WidgetSnapshot.read(context)
-        provideContent { Content(context, snap) }
+        provideContent { Content(snap) }
     }
 
     @Composable
-    private fun Content(context: Context, snap: WidgetSnapshot) {
+    private fun Content(snap: WidgetSnapshot) {
         WidgetScaffold {
             Eyebrow("Net worth")
             Text(
@@ -63,7 +63,7 @@ class NetWorthWidget : GlanceAppWidget() {
 
             Spacer(GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.height(8.dp))
-            ActionRow(context, snap.presets)
+            ActionRow(snap.presets)
         }
     }
 }

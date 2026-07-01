@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Star } from 'lucide-react'
 import Modal from '../ui/Modal'
 import { Button, Field, Input, Select } from '../ui/form'
 import { useAccounts, useCategories } from '../hooks'
@@ -10,8 +10,10 @@ import {
   updateTransfer,
   deleteTransaction,
   addCategory,
+  upsertPreset,
 } from '../db/repo'
-import { parseMajorInput, fromMinor } from '../lib/money'
+import { showToast } from '../ui/Toast'
+import { parseMajorInput, fromMinor, formatPHP } from '../lib/money'
 import { toDateInput, fromDateInput } from '../lib/dates'
 import { isSheetEditable } from '../lib/txnTypes'
 import type { Transaction } from '../db/types'
@@ -39,6 +41,7 @@ export default function AddTransactionSheet({
   const [categoryName, setCategoryName] = useState('')
   const [date, setDate] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
+  const [saveAsPreset, setSaveAsPreset] = useState(false)
   const [err, setErr] = useState('')
 
   const editing = !!editTxn
@@ -76,6 +79,7 @@ export default function AddTransactionSheet({
       setAccountId(defaultAccountId ?? accounts[0]?.id ?? '')
       setToAccountId('')
     }
+    setSaveAsPreset(false)
     setErr('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editTxn])
@@ -151,6 +155,21 @@ export default function AddTransactionSheet({
           date: ms,
           note: note.trim() || undefined,
         })
+      }
+
+      // Optionally turn this expense/income into a reusable widget quick-add
+      // button. `upsertPreset` dedupes by (type+amount+category+account), so
+      // saving the same combo twice never stacks duplicates. The preset is a
+      // bonus — a failure here must not undo the transaction we just saved.
+      if (saveAsPreset && (mode === 'expense' || mode === 'income')) {
+        const base = name || note.trim()
+        const label = base ? `${base} ${formatPHP(minor)}` : formatPHP(minor)
+        try {
+          await upsertPreset({ label, amount: minor, type: mode, categoryId, accountId })
+          showToast("Added to quick-add — it'll appear on your widget.")
+        } catch {
+          /* preset is a bonus; the transaction already saved */
+        }
       }
       close()
     } catch (e) {
@@ -276,6 +295,21 @@ export default function AddTransactionSheet({
                 ))}
               </datalist>
             </Field>
+          )}
+
+          {(mode === 'expense' || mode === 'income') && (
+            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-muted">
+              <input
+                type="checkbox"
+                checked={saveAsPreset}
+                onChange={(e) => setSaveAsPreset(e.target.checked)}
+                className="h-4 w-4 accent-accent"
+              />
+              <span className="inline-flex items-center gap-1.5">
+                <Star size={14} className={saveAsPreset ? 'text-accent' : 'text-dim'} />
+                Save as quick-add
+              </span>
+            </label>
           )}
 
           <div className="grid grid-cols-2 gap-2">

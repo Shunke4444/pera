@@ -551,13 +551,54 @@ export async function setDefaultAccount(accountId: string | undefined): Promise<
 
 // ------------------------------------------------- widget quick-add presets ---
 
-/** Insert or replace a quick-add preset (matched by id) in the settings list. */
-export async function upsertPreset(preset: QuickAddPreset): Promise<void> {
+/**
+ * A dedup key for a preset: same *action* = same type + amount + category +
+ * account. Two "Save as quick-add" taps on an identical expense collapse to one
+ * button instead of stacking duplicates (mirrors `catKey`'s approach).
+ */
+function presetKey(
+  p: Pick<QuickAddPreset, 'type' | 'amount' | 'categoryId' | 'accountId'>,
+): string {
+  return [p.type, p.amount, p.categoryId ?? '', p.accountId ?? ''].join('\x00')
+}
+
+/**
+ * Insert or update a quick-add preset in the settings list. Matching order:
+ *  1. If the preset carries an `id` that already exists → replace it in place
+ *     (the Settings editor's edit path).
+ *  2. Otherwise dedupe by action (`presetKey`) — saving the same combo twice
+ *     (e.g. "Save as quick-add" on an identical expense) refreshes the existing
+ *     preset's label instead of adding a twin, keeping its id.
+ *  3. Otherwise append, assigning a fresh id when one wasn't supplied.
+ */
+export async function upsertPreset(
+  preset: Omit<QuickAddPreset, 'id'> & { id?: string },
+): Promise<void> {
   const s = await db.settings.get('singleton')
   const list = s?.quickAddPresets ?? []
-  const i = list.findIndex((p) => p.id === preset.id)
-  const next = i >= 0 ? list.map((p) => (p.id === preset.id ? preset : p)) : [...list, preset]
-  await db.settings.update('singleton', { quickAddPresets: next })
+
+  const byId = preset.id ? list.findIndex((p) => p.id === preset.id) : -1
+  if (byId >= 0) {
+    const withId = { ...preset, id: preset.id! }
+    await db.settings.update('singleton', {
+      quickAddPresets: list.map((p, i) => (i === byId ? withId : p)),
+    })
+    return
+  }
+
+  const key = presetKey(preset)
+  const dup = list.findIndex((p) => presetKey(p) === key)
+  if (dup >= 0) {
+    // Same action already saved — keep its id, refresh its label; no duplicate.
+    await db.settings.update('singleton', {
+      quickAddPresets: list.map((p, i) => (i === dup ? { ...preset, id: p.id } : p)),
+    })
+    return
+  }
+
+  await db.settings.update('singleton', {
+    quickAddPresets: [...list, { ...preset, id: preset.id || newId() }],
+  })
 }
 
 /** Remove a quick-add preset by id. */

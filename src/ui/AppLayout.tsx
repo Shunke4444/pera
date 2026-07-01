@@ -15,6 +15,7 @@ import { applyTheme, getStoredTheme, resolveTheme, type Resolved } from '../them
 import { setThemePref } from '../db/repo'
 import AddTransactionSheet from '../components/AddTransactionSheet'
 import SnapshotPublisher from '../native/SnapshotPublisher'
+import ToastHost from './Toast'
 import { isPopup } from '../native/popup'
 
 const TABS = [
@@ -113,6 +114,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
       <AddTransactionSheet open={addOpen} onClose={() => setAddOpen(false)} />
       <SnapshotPublisher />
+      <ToastHost />
     </div>
   )
 }

@@ -1,6 +1,5 @@
 package app.pera.tracker
 
-import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -10,7 +9,6 @@ import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.action.actionRunCallback
-import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -75,15 +73,17 @@ internal fun Eyebrow(text: String) {
     )
 }
 
-/** The dashed-emerald "+" that opens the typed quick-add pop-up. */
+/** The emerald "+" that opens the native typed quick-add dialog (no WebView). */
 @Composable
-internal fun AddButton(context: Context, type: String, label: String, modifier: GlanceModifier) {
+internal fun AddButton(type: String, label: String, modifier: GlanceModifier) {
     Box(
         modifier = modifier
             .background(ACCENT)
             .cornerRadius(10.dp)
             .height(40.dp)
-            .clickable(actionStartActivity(popupIntent(context, type))),
+            .clickable(
+                actionRunCallback<OpenQuickAddAction>(actionParametersOf(KEY_TYPE to type)),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -108,6 +108,7 @@ internal fun PresetButton(preset: WidgetSnapshot.Preset, modifier: GlanceModifie
                         KEY_TYPE to preset.type,
                         KEY_ACCOUNT to preset.accountId,
                         KEY_CATEGORY to (preset.categoryId ?: ""),
+                        KEY_LABEL to preset.label,
                     ),
                 ),
             ),
@@ -126,13 +127,13 @@ internal fun PresetButton(preset: WidgetSnapshot.Preset, modifier: GlanceModifie
  * "+" for the typed pop-up. Presets come from the snapshot (Settings → presets).
  */
 @Composable
-internal fun ActionRow(context: Context, presets: List<WidgetSnapshot.Preset>) {
+internal fun ActionRow(presets: List<WidgetSnapshot.Preset>) {
     Row(modifier = GlanceModifier.fillMaxWidth()) {
         presets.take(2).forEach { p ->
             PresetButton(p, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(8.dp))
         }
-        AddButton(context, "expense", "+", GlanceModifier.width(48.dp))
+        AddButton("expense", "+", GlanceModifier.width(48.dp))
     }
 }
 

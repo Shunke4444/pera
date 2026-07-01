@@ -16,6 +16,27 @@ val KEY_AMOUNT = ActionParameters.Key<Long>("amount") // SIGNED minor units
 val KEY_TYPE = ActionParameters.Key<String>("type") // "expense" | "income"
 val KEY_ACCOUNT = ActionParameters.Key<String>("account")
 val KEY_CATEGORY = ActionParameters.Key<String>("category") // "" = none
+val KEY_LABEL = ActionParameters.Key<String>("label") // row label for recent[]
+
+/** Intent extra: which mode the native quick-add dialog opens in. */
+const val EXTRA_TYPE = "app.pera.tracker.extra.TYPE"
+
+/**
+ * Swallows repeated widget-tap launches within a short window. Widget taps can
+ * double-fire, and a cold Activity start is heavy; ~800 ms is enough to reuse
+ * the one window instead of stacking or re-launching.
+ */
+object LaunchDebounce {
+    private const val WINDOW_MS = 800L
+    @Volatile private var last = 0L
+
+    fun allow(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - last < WINDOW_MS) return false
+        last = now
+        return true
+    }
+}
 
 /**
  * Tapping a preset button: enqueue a pending transaction, optimistically update
@@ -29,10 +50,24 @@ class LogPresetAction : ActionCallback {
         val account = parameters[KEY_ACCOUNT] ?: return
         if (account.isEmpty()) return
         val category = parameters[KEY_CATEGORY]?.takeIf { it.isNotEmpty() }
+        val label = parameters[KEY_LABEL]
 
         PendingStore.enqueue(context, account, signed, type, category)
-        SnapshotStore.applyOptimisticLog(context, signed, type == "expense")
+        SnapshotStore.applyOptimisticLog(context, signed, type, label)
         refreshAllWidgets(context)
+    }
+}
+
+/**
+ * Tapping "+": open the NATIVE quick-add dialog (no WebView, instant). Debounced
+ * so bashing "+" can't stack launches. This is the primary typed-add path (the
+ * WebView pop-up is kept only as a fallback).
+ */
+class OpenQuickAddAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        if (!LaunchDebounce.allow()) return
+        val type = parameters[KEY_TYPE] ?: "expense"
+        context.startActivity(quickAddNativeIntent(context, type))
     }
 }
 
@@ -45,10 +80,29 @@ suspend fun refreshAllWidgets(context: Context) {
 }
 
 /**
- * Open the dialog-themed quick-add POP-UP over the home screen (a small floating
- * window, the app isn't fully opened). Explicit component → bypasses filters;
- * Capacitor reads the data URI as the launch URL and routes to /#/quick-add.
- * FLAG_ACTIVITY_NEW_TASK is required when starting an Activity from a widget.
+ * Open the NATIVE dialog-themed quick-add Activity (Compose, no WebView) over
+ * the home screen. Explicit component; the mode rides in an extra. Reuse flags
+ * (SINGLE_TOP | CLEAR_TOP | REORDER_TO_FRONT) so a second tap re-fronts the one
+ * window instead of stacking. NEW_TASK is required to start from a widget.
+ */
+fun quickAddNativeIntent(context: Context, type: String): Intent =
+    Intent(context, QuickAddNativeActivity::class.java).apply {
+        putExtra(EXTRA_TYPE, type)
+        addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+        )
+    }
+
+/**
+ * Open the dialog-themed quick-add POP-UP over the home screen (WebView
+ * fallback, kept for when the native dialog isn't wanted). Explicit component →
+ * bypasses filters; Capacitor reads the data URI as the launch URL and routes
+ * to /#/quick-add. Reuse flags (drop MULTIPLE_TASK, add SINGLE_TOP |
+ * REORDER_TO_FRONT) so repeated taps reuse the one pop-up instead of stacking
+ * WebViews. FLAG_ACTIVITY_NEW_TASK is required when starting from a widget.
  */
 fun popupIntent(context: Context, type: String): Intent =
     Intent(
@@ -59,8 +113,9 @@ fun popupIntent(context: Context, type: String): Intent =
     ).apply {
         addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP,
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
         )
     }
 
