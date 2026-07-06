@@ -16,7 +16,6 @@ val KEY_AMOUNT = ActionParameters.Key<Long>("amount") // SIGNED minor units
 val KEY_TYPE = ActionParameters.Key<String>("type") // "expense" | "income"
 val KEY_ACCOUNT = ActionParameters.Key<String>("account")
 val KEY_CATEGORY = ActionParameters.Key<String>("category") // "" = none
-val KEY_LABEL = ActionParameters.Key<String>("label") // row label for recent[]
 
 /** Intent extra: which mode the native quick-add dialog opens in. */
 const val EXTRA_TYPE = "app.pera.tracker.extra.TYPE"
@@ -39,9 +38,10 @@ object LaunchDebounce {
 }
 
 /**
- * Tapping a preset button: enqueue a pending transaction, optimistically update
- * the snapshot so the budget/net-worth figures move instantly, then recompose
- * every placed widget. No UI is shown. The web app reconciles on next launch.
+ * Tapping a preset button: INSERT a real transaction row straight into the
+ * shared SQLite file (real id, account, signed amount, the REAL categoryId,
+ * timestamps), then recompose every placed widget so it re-reads the DB. No UI,
+ * no queue — the app sees the exact same row instantly.
  */
 class LogPresetAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
@@ -50,10 +50,8 @@ class LogPresetAction : ActionCallback {
         val account = parameters[KEY_ACCOUNT] ?: return
         if (account.isEmpty()) return
         val category = parameters[KEY_CATEGORY]?.takeIf { it.isNotEmpty() }
-        val label = parameters[KEY_LABEL]
 
-        PendingStore.enqueue(context, account, signed, type, category)
-        SnapshotStore.applyOptimisticLog(context, signed, type, label)
+        PeraDb.insertTransaction(context, account, signed, type, category)
         refreshAllWidgets(context)
     }
 }

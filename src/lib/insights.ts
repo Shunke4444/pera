@@ -21,11 +21,14 @@ export function spendingByCategory(
   categories: Category[],
   month: string,
 ): CategorySlice[] {
+  const known = new Set(categories.map((c) => c.id))
   const totals = new Map<string, number>()
   for (const t of txns) {
     if (t.type !== 'expense') continue
     if (monthKey(t.date) !== month) continue
-    const key = t.categoryId ?? '__uncat__'
+    // Missing OR unknown (dangling) categoryId all collapse into one bucket, so
+    // the widget never shows several separate "Uncategorized" slices.
+    const key = t.categoryId && known.has(t.categoryId) ? t.categoryId : '__uncat__'
     totals.set(key, (totals.get(key) ?? 0) + Math.abs(t.amount))
   }
   const slices: CategorySlice[] = []

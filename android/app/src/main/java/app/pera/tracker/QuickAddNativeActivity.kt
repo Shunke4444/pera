@@ -41,10 +41,10 @@ import kotlinx.coroutines.launch
 /**
  * The NATIVE typed quick-add: a dialog-themed Compose Activity (no WebView, no
  * Capacitor boot) that opens instantly over the home screen. Amount number-pad +
- * account + category chips + Save. On Save it writes to the SAME native queue as
- * the preset instant-log (PendingStore.enqueue + SnapshotStore.applyOptimisticLog
- * + refreshAllWidgets); the web app reconciles it into IndexedDB on next launch
- * (idempotent drain). Replaces QuickAddPopupActivity as the primary "+" path.
+ * account + category chips + Save. On Save it INSERTS a real transaction row —
+ * with the REAL categoryId (this is where Food→Uncategorized was lost before) —
+ * straight into the shared SQLite file via PeraDb, then refreshes the widgets.
+ * The app reads the exact same row instantly. Primary "+" path.
  */
 class QuickAddNativeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,9 +58,8 @@ class QuickAddNativeActivity : ComponentActivity() {
                     snap = snap,
                     initialType = initialType,
                     onCancel = { finish() },
-                    onSave = { accountId, signed, type, label ->
-                        PendingStore.enqueue(applicationContext, accountId, signed, type, label)
-                        SnapshotStore.applyOptimisticLog(applicationContext, signed, type, label)
+                    onSave = { accountId, signed, type, categoryId ->
+                        PeraDb.insertTransaction(applicationContext, accountId, signed, type, categoryId)
                         CoroutineScope(Dispatchers.Default).launch {
                             try {
                                 refreshAllWidgets(applicationContext)
@@ -100,7 +99,7 @@ private fun QuickAddCard(
     snap: WidgetSnapshot,
     initialType: String,
     onCancel: () -> Unit,
-    onSave: (accountId: String, signed: Long, type: String, label: String?) -> Unit,
+    onSave: (accountId: String, signed: Long, type: String, categoryId: String?) -> Unit,
 ) {
     var type by remember { mutableStateOf(if (initialType == "income") "income" else "expense") }
     var amountText by remember { mutableStateOf("") }
@@ -206,8 +205,7 @@ private fun QuickAddCard(
                 modifier = Modifier.weight(1f),
                 onClick = {
                     val signed = if (type == "income") minor else -minor
-                    val label = cats.firstOrNull { it.id == categoryId }?.name
-                    onSave(accountId, signed, type, label)
+                    onSave(accountId, signed, type, categoryId)
                 },
             )
         }

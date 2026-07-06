@@ -43,7 +43,17 @@ class BudgetWidget : GlanceAppWidget() {
             Eyebrow("Budget · this month")
             val b = snap.budget
             if (b == null) {
-                EmptyHint("Set a monthly budget in Pera to track it here.")
+                // No budget (or fresh install): still show the "+" so the widget is
+                // never a dead end — just push it to the bottom under a short hint.
+                Spacer(GlanceModifier.height(6.dp))
+                Text(
+                    text = if (snap.hasData) "Set a monthly budget in Pera to track it here."
+                    else "Open Pera to get started.",
+                    style = TextStyle(color = ColorProvider(MUTED), fontSize = 12.sp),
+                )
+                Spacer(GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.height(8.dp))
+                ActionRow(snap.presets)
                 return@WidgetScaffold
             }
 

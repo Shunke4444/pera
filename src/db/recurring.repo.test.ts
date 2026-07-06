@@ -1,12 +1,15 @@
-import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { db } from './db'
+import { resetTestDb } from './testDb'
 import {
   addAccount,
   addRecurring,
   processDueRecurring,
   postRecurringNow,
   listRecurring,
+  updateRecurring,
+  getAccount,
+  getTransactions,
+  getRecurring,
 } from './repo'
 import { accountBalance } from '../lib/balances'
 
@@ -14,9 +17,10 @@ function ms(y: number, m: number, d: number): number {
   return new Date(y, m - 1, d).getTime()
 }
 
+const ruleById = async (id: string) => (await getRecurring()).find((r) => r.id === id)
+
 beforeEach(async () => {
-  await db.delete()
-  await db.open()
+  await resetTestDb()
 })
 
 async function account() {
@@ -40,17 +44,17 @@ describe('processDueRecurring — auto-post', () => {
     const posted = await processDueRecurring(ms(2026, 1, 20))
     expect(posted).toBe(1)
 
-    const txns = await db.transactions.toArray()
+    const txns = await getTransactions()
     expect(txns).toHaveLength(1)
     expect(txns[0].amount).toBe(6_000_000)
     expect(txns[0].type).toBe('income')
     expect(txns[0].recurringId).toBe(id)
     expect(txns[0].date).toBe(ms(2026, 1, 15))
 
-    const acct = await db.accounts.get(acc)
+    const acct = await getAccount(acc)
     expect(accountBalance(acct!, txns)).toBe(6_000_000)
 
-    const rule = await db.recurring.get(id)
+    const rule = await ruleById(id)
     expect(rule!.nextRunDate).toBe(ms(2026, 2, 15))
     expect(rule!.lastPostedDate).toBe(ms(2026, 1, 15))
   })
@@ -70,7 +74,7 @@ describe('processDueRecurring — auto-post', () => {
     await processDueRecurring(ms(2026, 1, 20))
     const again = await processDueRecurring(ms(2026, 1, 20))
     expect(again).toBe(0)
-    expect(await db.transactions.count()).toBe(1)
+    expect((await getTransactions()).length).toBe(1)
   })
 
   it('dedupes on (recurringId + date) even if next run is reset', async () => {
@@ -87,10 +91,10 @@ describe('processDueRecurring — auto-post', () => {
     })
     await processDueRecurring(ms(2026, 1, 20))
     // Simulate a crash that posted but didn't advance: rewind nextRunDate.
-    await db.recurring.update(id, { nextRunDate: ms(2026, 1, 15) })
+    await updateRecurring(id, { nextRunDate: ms(2026, 1, 15) })
     const again = await processDueRecurring(ms(2026, 1, 20))
     expect(again).toBe(0)
-    expect(await db.transactions.count()).toBe(1)
+    expect((await getTransactions()).length).toBe(1)
   })
 
   it('catches up every missed occurrence once', async () => {
@@ -123,7 +127,7 @@ describe('processDueRecurring — auto-post', () => {
       autoPost: true,
     })
     await processDueRecurring(ms(2026, 2, 28))
-    const txns = await db.transactions.toArray()
+    const txns = await getTransactions()
     expect(txns).toHaveLength(1)
     expect(txns[0].date).toBe(ms(2026, 2, 28))
   })
@@ -144,9 +148,9 @@ describe('manual ("remind me") rules', () => {
     })
     const posted = await processDueRecurring(ms(2026, 2, 10))
     expect(posted).toBe(0)
-    expect(await db.transactions.count()).toBe(0)
+    expect((await getTransactions()).length).toBe(0)
     // nextRunDate stays at the earliest due date so it shows as overdue/upcoming.
-    const rule = await db.recurring.get(id)
+    const rule = await ruleById(id)
     expect(rule!.nextRunDate).toBe(ms(2026, 1, 1))
   })
 
@@ -163,16 +167,16 @@ describe('manual ("remind me") rules', () => {
       autoPost: false,
     })
     await postRecurringNow(id)
-    let txns = await db.transactions.toArray()
+    let txns = await getTransactions()
     expect(txns).toHaveLength(1)
     expect(txns[0].amount).toBe(-1_200_000)
-    expect((await db.recurring.get(id))!.nextRunDate).toBe(ms(2026, 2, 1))
+    expect((await ruleById(id))!.nextRunDate).toBe(ms(2026, 2, 1))
 
     // A second click posts the NEXT occurrence (one per click).
     await postRecurringNow(id)
-    txns = await db.transactions.toArray()
+    txns = await getTransactions()
     expect(txns).toHaveLength(2)
-    expect((await db.recurring.get(id))!.nextRunDate).toBe(ms(2026, 3, 1))
+    expect((await ruleById(id))!.nextRunDate).toBe(ms(2026, 3, 1))
   })
 })
 
