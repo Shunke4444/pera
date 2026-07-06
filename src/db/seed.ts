@@ -1,5 +1,10 @@
-import { db, now } from './db'
+import { now } from './db'
+import { query, withTransaction } from './sql'
+import { insertRow } from './crud'
+import { emitChange } from './changes'
 import type { Account, AccountType, Category, Settings } from './types'
+
+const asRow = (o: unknown): Record<string, unknown> => o as Record<string, unknown>
 
 type SeedAccount = Pick<Account, 'id' | 'name' | 'bank' | 'color' | 'isIncomeSource'> & {
   type: AccountType
@@ -61,20 +66,29 @@ const seedSettings: Settings = {
   ],
 }
 
+async function count(table: string): Promise<number> {
+  return Number((await query(`SELECT COUNT(*) n FROM ${table}`))[0]?.n ?? 0)
+}
+
 /**
  * First-run seed: insert the 4 accounts, default categories, and the settings
  * singleton — only when the database is empty. Safe to call on every startup.
  */
 export async function seedIfEmpty(): Promise<void> {
-  await db.transaction('rw', db.accounts, db.categories, db.settings, async () => {
-    if ((await db.accounts.count()) === 0) {
-      await db.accounts.bulkAdd(seedAccounts)
+  let seeded = false
+  await withTransaction(async () => {
+    if ((await count('accounts')) === 0) {
+      for (const a of seedAccounts) await insertRow('accounts', asRow(a))
+      seeded = true
     }
-    if ((await db.categories.count()) === 0) {
-      await db.categories.bulkAdd(seedCategories)
+    if ((await count('categories')) === 0) {
+      for (const c of seedCategories) await insertRow('categories', asRow(c))
+      seeded = true
     }
-    if (!(await db.settings.get('singleton'))) {
-      await db.settings.add(seedSettings)
+    if ((await count('settings')) === 0) {
+      await insertRow('settings', asRow(seedSettings))
+      seeded = true
     }
   })
+  if (seeded) emitChange()
 }

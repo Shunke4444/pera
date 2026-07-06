@@ -1,8 +1,13 @@
 // Centralized write layer. Every mutation flows through here so ids, timestamps
-// and invariants (transfer pairs, adjustments) live in one place — and so a
-// future native widget / share-intent can reuse the exact same entry points.
+// and invariants (transfer pairs, adjustments) live in one place — and so the
+// native widget / share-intent can reuse the exact same entry points.
+//
+// Storage is SQLite now (was Dexie). Function names + return shapes are kept
+// identical so callers (screens, hooks, snapshot) don't change; each mutation
+// ends with emitChange() to drive the reactive hooks. Reads go through the
+// get*() helpers below (used by hooks, the snapshot builder and tests).
 
-import { db, newId, now } from './db'
+import { newId, now } from './db'
 import type {
   Account,
   Budget,
@@ -13,13 +18,95 @@ import type {
   Transaction,
   RecurringRule,
   RecurringFreq,
+  Settings,
 } from './types'
 import { importHash, type ParsedRow } from '../lib/importing'
 import { buildBackup, isValidBackup, type BackupV1 } from '../lib/backup'
 import { dueDates, nextDate, nextAfter } from '../lib/recurring'
 import { startOfDay } from '../lib/dates'
-import { parsePendingQueue, planDrain, type PendingTxn } from '../lib/pending'
-import { readPendingRaw, clearPendingQueue } from '../native/pendingStore'
+import { query, run, withTransaction } from './sql'
+import { insertRow, updateRow } from './crud'
+import { TABLES } from './schema'
+import { emitChange } from './changes'
+import {
+  accountFromRow,
+  transactionFromRow,
+  categoryFromRow,
+  budgetFromRow,
+  goalFromRow,
+  settingsFromRow,
+  recurringFromRow,
+} from './rows'
+
+const asRow = (o: unknown): Record<string, unknown> => o as Record<string, unknown>
+
+// --------------------------------------------------------------- reads ------
+// Plain array/object reads that mirror the old Dexie `toArray()` / `get()`
+// calls. Hooks, the snapshot builder and tests share these.
+
+/** All accounts, in sort order (callers filter archived as needed). */
+export async function getAccounts(): Promise<Account[]> {
+  return (await query('SELECT * FROM accounts ORDER BY sortOrder')).map(accountFromRow)
+}
+
+export async function getAccount(id: string): Promise<Account | undefined> {
+  const r = await query('SELECT * FROM accounts WHERE id=?', [id])
+  return r[0] ? accountFromRow(r[0]) : undefined
+}
+
+/** Every transaction (unordered — pure logic / hooks sort as needed). */
+export async function getTransactions(): Promise<Transaction[]> {
+  return (await query('SELECT * FROM transactions')).map(transactionFromRow)
+}
+
+export async function getTransactionsByAccount(accountId: string): Promise<Transaction[]> {
+  return (await query('SELECT * FROM transactions WHERE accountId=?', [accountId])).map(
+    transactionFromRow,
+  )
+}
+
+export async function getTransaction(id: string): Promise<Transaction | undefined> {
+  const r = await query('SELECT * FROM transactions WHERE id=?', [id])
+  return r[0] ? transactionFromRow(r[0]) : undefined
+}
+
+export async function getCategories(): Promise<Category[]> {
+  return (await query('SELECT * FROM categories')).map(categoryFromRow)
+}
+
+export async function getCategory(id: string): Promise<Category | undefined> {
+  const r = await query('SELECT * FROM categories WHERE id=?', [id])
+  return r[0] ? categoryFromRow(r[0]) : undefined
+}
+
+export async function getBudgets(): Promise<Budget[]> {
+  return (await query('SELECT * FROM budgets')).map(budgetFromRow)
+}
+
+/** Every goal incl. archived (listGoals filters + sorts for the UI). */
+export async function getGoals(): Promise<Goal[]> {
+  return (await query('SELECT * FROM goals')).map(goalFromRow)
+}
+
+export async function getGoal(id: string): Promise<Goal | undefined> {
+  const r = await query('SELECT * FROM goals WHERE id=?', [id])
+  return r[0] ? goalFromRow(r[0]) : undefined
+}
+
+export async function getSettings(): Promise<Settings | undefined> {
+  const r = await query('SELECT * FROM settings WHERE id=?', ['singleton'])
+  return r[0] ? settingsFromRow(r[0]) : undefined
+}
+
+/** Every recurring rule incl. archived. */
+export async function getRecurring(): Promise<RecurringRule[]> {
+  return (await query('SELECT * FROM recurring')).map(recurringFromRow)
+}
+
+async function getRecurringById(id: string): Promise<RecurringRule | undefined> {
+  const r = await query('SELECT * FROM recurring WHERE id=?', [id])
+  return r[0] ? recurringFromRow(r[0]) : undefined
+}
 
 // ---------------------------------------------------------------- accounts ---
 
@@ -30,8 +117,8 @@ export type NewAccountInput = Pick<Account, 'name' | 'bank' | 'type'> &
 export async function addAccount(input: NewAccountInput): Promise<string> {
   const id = newId()
   const ts = now()
-  const maxSort = await db.accounts.orderBy('sortOrder').last()
-  await db.accounts.add({
+  const maxSort = (await query('SELECT MAX(sortOrder) m FROM accounts'))[0]?.m
+  const account: Account = {
     id,
     name: input.name,
     bank: input.bank || input.name,
@@ -42,10 +129,12 @@ export async function addAccount(input: NewAccountInput): Promise<string> {
     color: input.color,
     icon: input.icon,
     archived: false,
-    sortOrder: (maxSort?.sortOrder ?? -1) + 1,
+    sortOrder: (maxSort == null ? -1 : Number(maxSort)) + 1,
     createdAt: ts,
     updatedAt: ts,
-  })
+  }
+  await insertRow('accounts', asRow(account))
+  emitChange()
   return id
 }
 
@@ -54,7 +143,8 @@ export async function updateAccount(
   id: string,
   patch: Partial<Omit<Account, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.accounts.update(id, { ...patch, updatedAt: now() })
+  await updateRow('accounts', id, { ...patch, updatedAt: now() })
+  emitChange()
 }
 
 /** Soft-archive (hide) an account without deleting its history. */
@@ -64,11 +154,12 @@ export async function archiveAccount(id: string, archived = true): Promise<void>
 
 /** Permanently delete an account and every transaction + recurring rule on it. */
 export async function deleteAccount(id: string): Promise<void> {
-  await db.transaction('rw', db.accounts, db.transactions, db.recurring, async () => {
-    await db.transactions.where('accountId').equals(id).delete()
-    await db.recurring.where('accountId').equals(id).delete()
-    await db.accounts.delete(id)
+  await withTransaction(async () => {
+    await run('DELETE FROM transactions WHERE accountId=?', [id])
+    await run('DELETE FROM recurring WHERE accountId=?', [id])
+    await run('DELETE FROM accounts WHERE id=?', [id])
   })
+  emitChange()
 }
 
 // ------------------------------------------------------------ transactions ---
@@ -81,12 +172,10 @@ export type NewTxnInput = Pick<Transaction, 'accountId' | 'amount' | 'type' | 'd
     >
   >
 
-/** Add a plain income/expense/adjustment txn. Returns its id. */
-export async function addTransaction(input: NewTxnInput): Promise<string> {
-  const id = newId()
+function buildTxn(input: NewTxnInput): Transaction {
   const ts = now()
-  await db.transactions.add({
-    id,
+  return {
+    id: newId(),
     accountId: input.accountId,
     amount: input.amount,
     type: input.type,
@@ -100,15 +189,23 @@ export async function addTransaction(input: NewTxnInput): Promise<string> {
     pendingId: input.pendingId,
     createdAt: ts,
     updatedAt: ts,
-  })
-  return id
+  }
+}
+
+/** Add a plain income/expense/adjustment txn. Returns its id. */
+export async function addTransaction(input: NewTxnInput): Promise<string> {
+  const t = buildTxn(input)
+  await insertRow('transactions', asRow(t))
+  emitChange()
+  return t.id
 }
 
 export async function updateTransaction(
   id: string,
   patch: Partial<Omit<Transaction, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.transactions.update(id, { ...patch, updatedAt: now() })
+  await updateRow('transactions', id, { ...patch, updatedAt: now() })
+  emitChange()
 }
 
 /**
@@ -116,15 +213,16 @@ export async function updateTransaction(
  * (same transferGroupId) so a transfer can never become half a transaction.
  */
 export async function deleteTransaction(id: string): Promise<void> {
-  await db.transaction('rw', db.transactions, async () => {
-    const t = await db.transactions.get(id)
+  await withTransaction(async () => {
+    const t = await getTransaction(id)
     if (!t) return
     if (t.transferGroupId) {
-      await db.transactions.where('transferGroupId').equals(t.transferGroupId).delete()
+      await run('DELETE FROM transactions WHERE transferGroupId=?', [t.transferGroupId])
     } else {
-      await db.transactions.delete(id)
+      await run('DELETE FROM transactions WHERE id=?', [id])
     }
   })
+  emitChange()
 }
 
 /**
@@ -136,9 +234,9 @@ export async function adjustBalance(
   realBalance: number,
   date = now(),
 ): Promise<void> {
-  const acct = await db.accounts.get(accountId)
+  const acct = await getAccount(accountId)
   if (!acct) return
-  const txns = await db.transactions.where('accountId').equals(accountId).toArray()
+  const txns = await getTransactionsByAccount(accountId)
   const computed = txns.reduce((s, t) => s + t.amount, acct.openingBalance)
   const delta = realBalance - computed
   if (delta === 0) return
@@ -159,7 +257,7 @@ export async function addTransfer(input: {
   const groupId = newId()
   const ts = now()
   const mag = Math.abs(input.amount)
-  await db.transactions.bulkAdd([
+  const legs: Transaction[] = [
     {
       id: newId(),
       accountId: input.fromAccountId,
@@ -184,7 +282,11 @@ export async function addTransfer(input: {
       createdAt: ts,
       updatedAt: ts,
     },
-  ])
+  ]
+  await withTransaction(async () => {
+    for (const leg of legs) await insertRow('transactions', asRow(leg))
+  })
+  emitChange()
   return groupId
 }
 
@@ -194,8 +296,10 @@ export async function updateTransfer(
   patch: { amount?: number; date?: number; note?: string },
 ): Promise<void> {
   const ts = now()
-  await db.transaction('rw', db.transactions, async () => {
-    const legs = await db.transactions.where('transferGroupId').equals(groupId).toArray()
+  await withTransaction(async () => {
+    const legs = (
+      await query('SELECT * FROM transactions WHERE transferGroupId=?', [groupId])
+    ).map(transactionFromRow)
     for (const leg of legs) {
       const next: Partial<Transaction> = { updatedAt: ts }
       if (patch.amount !== undefined) {
@@ -204,19 +308,21 @@ export async function updateTransfer(
       }
       if (patch.date !== undefined) next.date = patch.date
       if (patch.note !== undefined) next.note = patch.note || undefined
-      await db.transactions.update(leg.id, next)
+      await updateRow('transactions', leg.id, next)
     }
   })
+  emitChange()
 }
 
 /** Re-assign a category to many transactions at once (Activity bulk action). */
 export async function bulkRecategorize(ids: string[], categoryId: string): Promise<void> {
   const ts = now()
-  await db.transaction('rw', db.transactions, async () => {
+  await withTransaction(async () => {
     for (const id of ids) {
-      await db.transactions.update(id, { categoryId, updatedAt: ts })
+      await updateRow('transactions', id, { categoryId, updatedAt: ts })
     }
   })
+  emitChange()
 }
 
 // -------------------------------------------------------------- categories ---
@@ -246,20 +352,20 @@ export async function addCategory(input: {
 }): Promise<string> {
   const name = input.name.trim()
   const key = catKey(name, input.kind)
-  const existing = (await db.categories.toArray()).find(
-    (c) => catKey(c.name, c.kind) === key,
-  )
+  const all = await getCategories()
+  const existing = all.find((c) => catKey(c.name, c.kind) === key)
   if (existing) return existing.id
 
   const id = newId()
-  const count = await db.categories.count()
-  await db.categories.add({
+  const category: Category = {
     id,
     name,
     kind: input.kind,
-    color: input.color ?? CATEGORY_COLORS[count % CATEGORY_COLORS.length],
+    color: input.color ?? CATEGORY_COLORS[all.length % CATEGORY_COLORS.length],
     icon: input.icon,
-  })
+  }
+  await insertRow('categories', asRow(category))
+  emitChange()
   return id
 }
 
@@ -268,7 +374,8 @@ export async function updateCategory(
   id: string,
   patch: Partial<Omit<Category, 'id'>>,
 ): Promise<void> {
-  await db.categories.update(id, patch)
+  await updateRow('categories', id, patch)
+  emitChange()
 }
 
 /**
@@ -277,15 +384,12 @@ export async function updateCategory(
  * a simple clear-and-remove so nothing dangles a deleted id.
  */
 export async function deleteCategory(id: string): Promise<void> {
-  await db.transaction('rw', db.transactions, db.budgets, db.categories, async () => {
-    const txns = await db.transactions.where('categoryId').equals(id).toArray()
-    const ts = now()
-    for (const t of txns) {
-      await db.transactions.update(t.id, { categoryId: undefined, updatedAt: ts })
-    }
-    await db.budgets.where('categoryId').equals(id).delete()
-    await db.categories.delete(id)
+  await withTransaction(async () => {
+    await run('UPDATE transactions SET categoryId=NULL, updatedAt=? WHERE categoryId=?', [now(), id])
+    await run('DELETE FROM budgets WHERE categoryId=?', [id])
+    await run('DELETE FROM categories WHERE id=?', [id])
   })
+  emitChange()
 }
 
 // ----------------------------------------------------------------- budgets ---
@@ -297,7 +401,7 @@ export async function addBudget(input: {
 }): Promise<string> {
   const id = newId()
   const ts = now()
-  await db.budgets.add({
+  const budget: Budget = {
     id,
     categoryId: input.categoryId,
     amount: input.amount,
@@ -305,7 +409,9 @@ export async function addBudget(input: {
     rollover: input.rollover,
     createdAt: ts,
     updatedAt: ts,
-  })
+  }
+  await insertRow('budgets', asRow(budget))
+  emitChange()
   return id
 }
 
@@ -313,11 +419,13 @@ export async function updateBudget(
   id: string,
   patch: Partial<Omit<Budget, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.budgets.update(id, { ...patch, updatedAt: now() })
+  await updateRow('budgets', id, { ...patch, updatedAt: now() })
+  emitChange()
 }
 
 export async function deleteBudget(id: string): Promise<void> {
-  await db.budgets.delete(id)
+  await run('DELETE FROM budgets WHERE id=?', [id])
+  emitChange()
 }
 
 // ------------------------------------------------------------------- goals ---
@@ -331,7 +439,7 @@ export async function addGoal(input: {
 }): Promise<string> {
   const id = newId()
   const ts = now()
-  await db.goals.add({
+  const goal: Goal = {
     id,
     name: input.name,
     targetAmount: input.targetAmount,
@@ -341,7 +449,9 @@ export async function addGoal(input: {
     archived: false,
     createdAt: ts,
     updatedAt: ts,
-  })
+  }
+  await insertRow('goals', asRow(goal))
+  emitChange()
   return id
 }
 
@@ -349,7 +459,8 @@ export async function updateGoal(
   id: string,
   patch: Partial<Omit<Goal, 'id' | 'createdAt'>>,
 ): Promise<void> {
-  await db.goals.update(id, { ...patch, updatedAt: now() })
+  await updateRow('goals', id, { ...patch, updatedAt: now() })
+  emitChange()
 }
 
 export async function archiveGoal(id: string, archived = true): Promise<void> {
@@ -362,20 +473,23 @@ export async function archiveGoal(id: string, archived = true): Promise<void> {
  * first goal — is guaranteed to load.
  */
 export async function listGoals(): Promise<Goal[]> {
-  const rows = await db.goals.toArray()
-  return rows.filter((g) => !g.archived).sort((a, b) => a.createdAt - b.createdAt)
+  return (await query('SELECT * FROM goals WHERE archived=0 ORDER BY createdAt')).map(goalFromRow)
 }
 
 export async function deleteGoal(id: string): Promise<void> {
-  await db.goals.delete(id)
+  await run('DELETE FROM goals WHERE id=?', [id])
+  emitChange()
 }
 
 // ------------------------------------------------------------------ import ---
 
 /** All importHashes already present on an account (for dedup). */
 export async function getAccountImportHashes(accountId: string): Promise<Set<string>> {
-  const rows = await db.transactions.where('accountId').equals(accountId).toArray()
-  return new Set(rows.map((r) => r.importHash).filter(Boolean) as string[])
+  const rows = await query(
+    'SELECT importHash FROM transactions WHERE accountId=? AND importHash IS NOT NULL',
+    [accountId],
+  )
+  return new Set(rows.map((r) => String(r.importHash)))
 }
 
 export interface ImportResult {
@@ -418,55 +532,68 @@ export async function commitImport(
     })
   }
 
-  await db.transaction('rw', db.accounts, db.transactions, async () => {
-    if (toAdd.length) await db.transactions.bulkAdd(toAdd)
+  await withTransaction(async () => {
+    for (const t of toAdd) await insertRow('transactions', asRow(t))
     if (opts.endingBalance != null) {
-      const acct = await db.accounts.get(accountId)
+      const acct = await getAccount(accountId)
       if (acct) {
-        const all = await db.transactions.where('accountId').equals(accountId).toArray()
+        const all = await getTransactionsByAccount(accountId)
         const computed = all.reduce((s, t) => s + t.amount, acct.openingBalance)
         const delta = opts.endingBalance - computed
         if (delta !== 0) {
-          await db.transactions.add({
-            id: newId(),
-            accountId,
-            amount: delta,
-            type: 'adjustment',
-            date: ts,
-            note: 'Statement balance reconcile',
-            importBatchId: batchId,
-            createdAt: ts,
-            updatedAt: ts,
-          })
+          await insertRow(
+            'transactions',
+            asRow({
+              id: newId(),
+              accountId,
+              amount: delta,
+              type: 'adjustment',
+              date: ts,
+              note: 'Statement balance reconcile',
+              importBatchId: batchId,
+              createdAt: ts,
+              updatedAt: ts,
+            }),
+          )
         }
       }
     }
   })
 
+  emitChange()
   return { batchId, added: toAdd.length, skipped: rows.length - toAdd.length }
 }
 
 /** Undo a whole import batch (incl. its reconciliation adjustment). */
 export async function undoImport(batchId: string): Promise<void> {
-  await db.transactions.where('importBatchId').equals(batchId).delete()
+  await run('DELETE FROM transactions WHERE importBatchId=?', [batchId])
+  emitChange()
 }
 
 // ------------------------------------------------------------------ backup ---
 
 /** Snapshot every table into a portable backup object. */
 export async function exportData(): Promise<BackupV1> {
-  const [accounts, transactions, categories, budgets, goals, settings, recurring] =
+  const [accounts, transactions, categories, budgets, goals, settingsRow, recurring] =
     await Promise.all([
-      db.accounts.toArray(),
-      db.transactions.toArray(),
-      db.categories.toArray(),
-      db.budgets.toArray(),
-      db.goals.toArray(),
-      db.settings.toArray(),
-      db.recurring.toArray(),
+      getAccounts(),
+      getTransactions(),
+      getCategories(),
+      getBudgets(),
+      getGoals(),
+      getSettings(),
+      getRecurring(),
     ])
   return buildBackup(
-    { accounts, transactions, categories, budgets, goals, settings, recurring },
+    {
+      accounts,
+      transactions,
+      categories,
+      budgets,
+      goals,
+      settings: settingsRow ? [settingsRow] : [],
+      recurring,
+    },
     now(),
   )
 }
@@ -477,76 +604,65 @@ export async function exportData(): Promise<BackupV1> {
  * Restore is the recovery path, so a bad file must never empty the DB:
  *  1. `isValidBackup` validates every row (incl. non-empty ids) BEFORE we touch
  *     the DB — a malformed-but-plausible file is rejected with no mutation.
- *  2. The clear + bulkAdd run in ONE `rw` transaction, so if any insert still
- *     throws the whole thing rolls back and the existing data is left intact.
+ *  2. The clear + inserts run in ONE transaction, so if any insert still throws
+ *     the whole thing rolls back and the existing data is left intact.
  */
 export async function importData(backup: unknown): Promise<void> {
   if (!isValidBackup(backup)) throw new Error('Not a valid Pera backup file.')
   const { accounts, transactions, categories, budgets, goals, settings } = backup
   const recurring = backup.recurring ?? []
-  await db.transaction(
-    'rw',
-    [db.accounts, db.transactions, db.categories, db.budgets, db.goals, db.settings, db.recurring],
-    async () => {
-      await Promise.all([
-        db.accounts.clear(),
-        db.transactions.clear(),
-        db.categories.clear(),
-        db.budgets.clear(),
-        db.goals.clear(),
-        db.settings.clear(),
-        db.recurring.clear(),
-      ])
-      await Promise.all([
-        db.accounts.bulkAdd(accounts),
-        db.transactions.bulkAdd(transactions),
-        db.categories.bulkAdd(categories),
-        db.budgets.bulkAdd(budgets),
-        db.goals.bulkAdd(goals),
-        db.settings.bulkAdd(settings),
-        db.recurring.bulkAdd(recurring),
-      ])
-    },
-  )
+  await withTransaction(async () => {
+    for (const t of TABLES) await run(`DELETE FROM ${t}`)
+    for (const a of accounts) await insertRow('accounts', asRow(a))
+    for (const t of transactions) await insertRow('transactions', asRow(t))
+    for (const c of categories) await insertRow('categories', asRow(c))
+    for (const b of budgets) await insertRow('budgets', asRow(b))
+    for (const g of goals) await insertRow('goals', asRow(g))
+    for (const s of settings) await insertRow('settings', asRow(s))
+    for (const r of recurring) await insertRow('recurring', asRow(r))
+  })
+  emitChange()
 }
 
 /** Wipe all data (accounts, transactions, budgets, goals, categories, settings). */
 export async function clearAllData(): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.accounts, db.transactions, db.categories, db.budgets, db.goals, db.settings, db.recurring],
-    async () => {
-      await Promise.all([
-        db.accounts.clear(),
-        db.transactions.clear(),
-        db.categories.clear(),
-        db.budgets.clear(),
-        db.goals.clear(),
-        db.settings.clear(),
-        db.recurring.clear(),
-      ])
-    },
-  )
+  await withTransaction(async () => {
+    for (const t of TABLES) await run(`DELETE FROM ${t}`)
+  })
+  emitChange()
+}
+
+// ------------------------------------------------------------- settings ------
+
+/** Patch the settings singleton and notify subscribers. */
+async function patchSettings(patch: Partial<Settings>): Promise<void> {
+  await updateRow('settings', 'singleton', asRow(patch))
+  emitChange()
+}
+
+/** Generic settings patch (Settings screen + tests). */
+export async function updateSettings(patch: Partial<Settings>): Promise<void> {
+  await patchSettings(patch)
 }
 
 /** Stamp the last-backup time on the settings singleton. */
 export async function markBackedUp(): Promise<void> {
-  await db.settings.update('singleton', { lastBackupAt: now() })
+  await patchSettings({ lastBackupAt: now() })
 }
 
 /** Persist the chosen theme into settings (UI also keeps a localStorage copy). */
 export async function setThemePref(theme: 'system' | 'light' | 'dark'): Promise<void> {
-  await db.settings.update('singleton', { theme })
+  await patchSettings({ theme })
 }
 
 /** Set (or clear, with undefined) the overall monthly budget — minor units. */
 export async function setMonthlyBudget(amount: number | undefined): Promise<void> {
-  await db.settings.update('singleton', { monthlyBudget: amount })
+  await patchSettings({ monthlyBudget: amount })
 }
 
 /** Set (or clear) the default account quick-add posts to. */
 export async function setDefaultAccount(accountId: string | undefined): Promise<void> {
-  await db.settings.update('singleton', { defaultAccountId: accountId })
+  await patchSettings({ defaultAccountId: accountId })
 }
 
 // ------------------------------------------------- widget quick-add presets ---
@@ -574,15 +690,13 @@ function presetKey(
 export async function upsertPreset(
   preset: Omit<QuickAddPreset, 'id'> & { id?: string },
 ): Promise<void> {
-  const s = await db.settings.get('singleton')
+  const s = await getSettings()
   const list = s?.quickAddPresets ?? []
 
   const byId = preset.id ? list.findIndex((p) => p.id === preset.id) : -1
   if (byId >= 0) {
     const withId = { ...preset, id: preset.id! }
-    await db.settings.update('singleton', {
-      quickAddPresets: list.map((p, i) => (i === byId ? withId : p)),
-    })
+    await patchSettings({ quickAddPresets: list.map((p, i) => (i === byId ? withId : p)) })
     return
   }
 
@@ -590,62 +704,22 @@ export async function upsertPreset(
   const dup = list.findIndex((p) => presetKey(p) === key)
   if (dup >= 0) {
     // Same action already saved — keep its id, refresh its label; no duplicate.
-    await db.settings.update('singleton', {
+    await patchSettings({
       quickAddPresets: list.map((p, i) => (i === dup ? { ...preset, id: p.id } : p)),
     })
     return
   }
 
-  await db.settings.update('singleton', {
+  await patchSettings({
     quickAddPresets: [...list, { ...preset, id: preset.id || newId() }],
   })
 }
 
 /** Remove a quick-add preset by id. */
 export async function deletePreset(id: string): Promise<void> {
-  const s = await db.settings.get('singleton')
+  const s = await getSettings()
   const next = (s?.quickAddPresets ?? []).filter((p) => p.id !== id)
-  await db.settings.update('singleton', { quickAddPresets: next })
-}
-
-// ------------------------------------------------- widget pending-log queue ---
-
-/**
- * Import a batch of native widget pending-logs into IndexedDB. Idempotent by
- * pending id: a record whose id already landed (it carries `pendingId`) is
- * skipped, so re-draining an un-cleared queue never double-posts. Returns the
- * number actually added. Pure-ish — the dedupe decision lives in `planDrain`.
- */
-export async function drainPendingTxns(pending: PendingTxn[]): Promise<number> {
-  if (pending.length === 0) return 0
-  const existing = new Set(
-    (await db.transactions.toArray()).map((t) => t.pendingId).filter(Boolean) as string[],
-  )
-  const { toAdd } = planDrain(pending, existing)
-  for (const item of toAdd) {
-    await addTransaction({
-      accountId: item.accountId,
-      amount: item.amount,
-      type: item.type,
-      categoryId: item.categoryId,
-      date: item.date,
-      pendingId: item.id,
-    })
-  }
-  return toAdd.length
-}
-
-/**
- * Read the native widget pending queue, drain it into IndexedDB (idempotent),
- * and clear it. Safe to call on every app start; a no-op on web (empty queue).
- * Returns how many transactions were imported.
- */
-export async function drainPendingQueue(): Promise<number> {
-  const pending = parsePendingQueue(await readPendingRaw())
-  if (pending.length === 0) return 0
-  const added = await drainPendingTxns(pending)
-  await clearPendingQueue()
-  return added
+  await patchSettings({ quickAddPresets: next })
 }
 
 /**
@@ -667,7 +741,7 @@ export async function contributeToGoal(input: {
   note?: string
 }): Promise<string> {
   const mag = Math.abs(input.amount)
-  const goal = await db.goals.get(input.goalId)
+  const goal = await getGoal(input.goalId)
 
   if (goal?.linkedAccountId && goal.linkedAccountId !== input.accountId) {
     return addTransfer({
@@ -718,7 +792,7 @@ export async function addRecurring(input: NewRecurringInput): Promise<string> {
   const ts = now()
   const anchor = anchorFor(input.freq, input.anchorDay, input.startDate)
   const interval = Math.max(1, Math.floor(input.interval))
-  await db.recurring.add({
+  const rule: RecurringRule = {
     id,
     accountId: input.accountId,
     type: input.type,
@@ -735,7 +809,9 @@ export async function addRecurring(input: NewRecurringInput): Promise<string> {
     archived: false,
     createdAt: ts,
     updatedAt: ts,
-  })
+  }
+  await insertRow('recurring', asRow(rule))
+  emitChange()
   return id
 }
 
@@ -745,7 +821,7 @@ export async function updateRecurring(
   patch: Partial<Omit<RecurringRule, 'id' | 'createdAt'>>,
 ): Promise<void> {
   const ts = now()
-  const existing = await db.recurring.get(id)
+  const existing = await getRecurringById(id)
   if (!existing) return
   const merged = { ...existing, ...patch }
   const scheduleChanged =
@@ -762,28 +838,32 @@ export async function updateRecurring(
     next.anchorDay = anchor
     next.nextRunDate = nextDate(merged.freq, interval, anchor, merged.startDate)
   }
-  await db.recurring.update(id, next)
+  await updateRow('recurring', id, next)
+  emitChange()
 }
 
 export async function archiveRecurring(id: string, archived = true): Promise<void> {
-  await db.recurring.update(id, { archived, updatedAt: now() })
+  await updateRow('recurring', id, { archived, updatedAt: now() })
+  emitChange()
 }
 
 export async function deleteRecurring(id: string): Promise<void> {
-  await db.recurring.delete(id)
+  await run('DELETE FROM recurring WHERE id=?', [id])
+  emitChange()
 }
 
 /** Non-archived rules, soonest next run first. */
 export async function listRecurring(): Promise<RecurringRule[]> {
-  const rows = await db.recurring.toArray()
-  return rows.filter((r) => !r.archived).sort((a, b) => a.nextRunDate - b.nextRunDate)
+  return (await query('SELECT * FROM recurring WHERE archived=0 ORDER BY nextRunDate')).map(
+    recurringFromRow,
+  )
 }
 
 const signedAmount = (r: RecurringRule): number =>
   r.type === 'income' ? Math.abs(r.amount) : -Math.abs(r.amount)
 
 /**
- * Post every due occurrence of every auto-post rule up to `nowMs`, in one rw
+ * Post every due occurrence of every auto-post rule up to `nowMs`, in one
  * transaction. Idempotent: dedupes on (recurringId + date) so reopening the app
  * never double-posts, and advances nextRunDate/lastPostedDate. Manual ("remind
  * me") rules are left untouched so they surface as upcoming/overdue. Safe to
@@ -791,24 +871,72 @@ const signedAmount = (r: RecurringRule): number =>
  */
 export async function processDueRecurring(nowMs: number = now()): Promise<number> {
   let posted = 0
-  await db.transaction('rw', db.recurring, db.transactions, async () => {
-    const rules = (await db.recurring.toArray()).filter((r) => !r.archived)
+  let changed = false
+  await withTransaction(async () => {
+    const rules = (await query('SELECT * FROM recurring WHERE archived=0')).map(recurringFromRow)
     for (const rule of rules) {
       const due = dueDates(rule, nowMs)
       if (due.length === 0 || !rule.autoPost) continue
 
-      const onAccount = await db.transactions.where('accountId').equals(rule.accountId).toArray()
-      const have = new Set(
-        onAccount.filter((t) => t.recurringId === rule.id).map((t) => t.date),
+      const existing = await query(
+        'SELECT date FROM transactions WHERE accountId=? AND recurringId=?',
+        [rule.accountId, rule.id],
       )
+      const have = new Set(existing.map((r) => Number(r.date)))
       const ts = now()
       const amount = signedAmount(rule)
       for (const date of due) {
         if (have.has(date)) continue
-        await db.transactions.add({
+        await insertRow(
+          'transactions',
+          asRow({
+            id: newId(),
+            accountId: rule.accountId,
+            amount,
+            type: rule.type,
+            categoryId: rule.categoryId,
+            date,
+            note: rule.note,
+            recurringId: rule.id,
+            createdAt: ts,
+            updatedAt: ts,
+          }),
+        )
+        have.add(date)
+        posted++
+      }
+      const last = due[due.length - 1]
+      await updateRow('recurring', rule.id, {
+        nextRunDate: nextAfter(rule, last),
+        lastPostedDate: last,
+        updatedAt: ts,
+      })
+      changed = true
+    }
+  })
+  if (changed) emitChange()
+  return posted
+}
+
+/** Post the current due occurrence of a rule once (the manual "Add" button). */
+export async function postRecurringNow(ruleId: string): Promise<void> {
+  await withTransaction(async () => {
+    const rule = await getRecurringById(ruleId)
+    if (!rule || rule.archived) return
+    const date = startOfDay(rule.nextRunDate)
+    if (rule.endDate != null && date > rule.endDate) return
+    const existing = await query(
+      'SELECT id FROM transactions WHERE accountId=? AND recurringId=? AND date=?',
+      [rule.accountId, rule.id, date],
+    )
+    const ts = now()
+    if (existing.length === 0) {
+      await insertRow(
+        'transactions',
+        asRow({
           id: newId(),
           accountId: rule.accountId,
-          amount,
+          amount: signedAmount(rule),
           type: rule.type,
           categoryId: rule.categoryId,
           date,
@@ -816,49 +944,14 @@ export async function processDueRecurring(nowMs: number = now()): Promise<number
           recurringId: rule.id,
           createdAt: ts,
           updatedAt: ts,
-        })
-        have.add(date)
-        posted++
-      }
-      const last = due[due.length - 1]
-      await db.recurring.update(rule.id, {
-        nextRunDate: nextAfter(rule, last),
-        lastPostedDate: last,
-        updatedAt: ts,
-      })
+        }),
+      )
     }
-  })
-  return posted
-}
-
-/** Post the current due occurrence of a rule once (the manual "Add" button). */
-export async function postRecurringNow(ruleId: string): Promise<void> {
-  await db.transaction('rw', db.recurring, db.transactions, async () => {
-    const rule = await db.recurring.get(ruleId)
-    if (!rule || rule.archived) return
-    const date = startOfDay(rule.nextRunDate)
-    if (rule.endDate != null && date > rule.endDate) return
-    const onAccount = await db.transactions.where('accountId').equals(rule.accountId).toArray()
-    const dup = onAccount.some((t) => t.recurringId === rule.id && t.date === date)
-    const ts = now()
-    if (!dup) {
-      await db.transactions.add({
-        id: newId(),
-        accountId: rule.accountId,
-        amount: signedAmount(rule),
-        type: rule.type,
-        categoryId: rule.categoryId,
-        date,
-        note: rule.note,
-        recurringId: rule.id,
-        createdAt: ts,
-        updatedAt: ts,
-      })
-    }
-    await db.recurring.update(rule.id, {
+    await updateRow('recurring', rule.id, {
       nextRunDate: nextAfter(rule, date),
       lastPostedDate: date,
       updatedAt: ts,
     })
   })
+  emitChange()
 }

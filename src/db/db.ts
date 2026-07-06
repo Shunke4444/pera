@@ -1,13 +1,11 @@
-import Dexie, { type Table } from 'dexie'
-import type {
-  Account,
-  Transaction,
-  Category,
-  Budget,
-  Goal,
-  Settings,
-  RecurringRule,
-} from './types'
+// Database bootstrap. Storage is now shared SQLite (via @capacitor-community/
+// sqlite) instead of Dexie/IndexedDB, so the WebView and — from Phase 4 — the
+// native widget read/write the SAME file. `initDb()` picks the driver, applies
+// the schema + PRAGMAs, and runs the one-time Dexie→SQLite migration. `newId`
+// and `now` are unchanged so the rest of the app is untouched.
+
+import { hasDriver, setDriver, execute } from './sql'
+import { PRAGMAS, SCHEMA } from './schema'
 
 export type {
   Account,
@@ -42,39 +40,20 @@ export function now(): number {
   return Date.now()
 }
 
-export class PeraDB extends Dexie {
-  accounts!: Table<Account, string>
-  transactions!: Table<Transaction, string>
-  categories!: Table<Category, string>
-  budgets!: Table<Budget, string>
-  goals!: Table<Goal, string>
-  settings!: Table<Settings, string>
-  recurring!: Table<RecurringRule, string>
-
-  constructor() {
-    super('pera')
-    // Only indexed fields are listed; `id` is the primary key (first).
-    // IndexedDB keys can't be booleans, so `archived` is filtered in JS, not
-    // indexed. Only number/string/Date/Array fields are listed here.
-    this.version(1).stores({
-      accounts: 'id, bank, sortOrder',
-      transactions:
-        'id, accountId, date, categoryId, type, goalId, transferGroupId, importBatchId, importHash, [accountId+date]',
-      categories: 'id, kind',
-      budgets: 'id, categoryId',
-      goals: 'id, linkedAccountId',
-      settings: 'id',
-    })
-    // v2 (additive): recurring rules. Dexie upgrades existing v1 data in place;
-    // the v1 block above is left untouched. `recurringId` on Transaction is not
-    // indexed (dedupe scans by accountId), so transactions keeps its v1 schema.
-    this.version(2).stores({
-      recurring: 'id, accountId, nextRunDate',
-    })
+/**
+ * Open the shared SQLite database, apply schema + PRAGMAs (WAL, busy_timeout),
+ * and run the legacy IndexedDB migration once. Idempotent — safe to await on
+ * every launch (CREATE TABLE IF NOT EXISTS; the driver is created only once).
+ * The Capacitor driver is imported lazily so tests can inject the sql.js driver
+ * via setDriver() and never load the native plugin.
+ */
+export async function initDb(): Promise<void> {
+  if (!hasDriver()) {
+    const { createCapacitorDriver } = await import('./driver/capacitor')
+    setDriver(await createCapacitorDriver())
   }
+  await execute(PRAGMAS)
+  await execute(SCHEMA)
+  const { migrateFromDexieIfNeeded } = await import('./migrate')
+  await migrateFromDexieIfNeeded()
 }
-
-export const db = new PeraDB()
-
-// Re-export Dexie's reactive primitive so screens/hooks have one import source.
-export { liveQuery } from 'dexie'

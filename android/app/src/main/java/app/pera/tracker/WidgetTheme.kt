@@ -93,7 +93,7 @@ internal fun AddButton(type: String, label: String, modifier: GlanceModifier) {
     }
 }
 
-/** A one-tap instant-log preset button (no UI; writes to the pending queue). */
+/** A one-tap instant-log preset button (no UI; inserts a real row into SQLite). */
 @Composable
 internal fun PresetButton(preset: WidgetSnapshot.Preset, modifier: GlanceModifier) {
     Box(
@@ -108,7 +108,6 @@ internal fun PresetButton(preset: WidgetSnapshot.Preset, modifier: GlanceModifie
                         KEY_TYPE to preset.type,
                         KEY_ACCOUNT to preset.accountId,
                         KEY_CATEGORY to (preset.categoryId ?: ""),
-                        KEY_LABEL to preset.label,
                     ),
                 ),
             ),

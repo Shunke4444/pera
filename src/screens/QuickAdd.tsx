@@ -5,7 +5,6 @@ import { useAccounts, useCategories, useTransactions, useSettings } from '../hoo
 import { addTransaction, addCategory } from '../db/repo'
 import { parseMajorInput } from '../lib/money'
 import { parseQuickAddParams, type QuickAddType } from '../lib/quickAdd'
-import { publishSnapshot } from '../lib/snapshot'
 import { isPopup, dismissPopup } from '../native/popup'
 import { Button, Field, Input } from '../ui/form'
 import { Dot, SectionTitle } from '../ui/common'
@@ -120,8 +119,8 @@ export default function QuickAdd() {
         note: note.trim() || undefined,
       })
       setLastCat(type, name)
-      // Refresh the native widget snapshot after the write (no-op on web).
-      void publishSnapshot()
+      // The write fired emitChange(); widgetRefresh nudges placed widgets to
+      // re-read SQLite (no-op on web). Nothing to publish.
       setSaved(true)
       // In the pop-up, close the floating window; otherwise route home.
       if (popup) setTimeout(() => void dismissPopup(), 450)
