@@ -81,30 +81,49 @@ class OpenQuickAddAction : ActionCallback {
 
 /** Recompose every Pera widget from the freshly written snapshot. */
 suspend fun refreshAllWidgets(context: Context) {
-    // 1. Glance path (primary)
-    BudgetWidget().updateAll(context)
-    NetWorthWidget().updateAll(context)
-    GoalsWidget().updateAll(context)
-    ActivityWidget().updateAll(context)
-    // 2. AppWidgetManager path (fallback) — notifies the OS directly so
-    //    widgets recompose even if Glance's coroutine scope is cancelled.
+    // 1. Glance path
+    try {
+        BudgetWidget().updateAll(context)
+    } catch (t: Throwable) {
+        Log.w("WidgetRefresh", "Glance BudgetWidget.updateAll — ${t.message}")
+    }
+    try {
+        NetWorthWidget().updateAll(context)
+    } catch (t: Throwable) {
+        Log.w("WidgetRefresh", "Glance NetWorthWidget.updateAll — ${t.message}")
+    }
+    try {
+        GoalsWidget().updateAll(context)
+    } catch (t: Throwable) {
+        Log.w("WidgetRefresh", "Glance GoalsWidget.updateAll — ${t.message}")
+    }
+    try {
+        ActivityWidget().updateAll(context)
+    } catch (t: Throwable) {
+        Log.w("WidgetRefresh", "Glance ActivityWidget.updateAll — ${t.message}")
+    }
+    // 2. Direct broadcast fallback — sends ACTION_APPWIDGET_UPDATE to each
+    //    receiver, bypassing Glance's internal state so the OS forces a
+    //    recompose even if Glance's coroutine mechanism is unreliable.
+    broadcastWidgetUpdate(context, BudgetWidgetReceiver::class.java)
+    broadcastWidgetUpdate(context, NetWorthWidgetReceiver::class.java)
+    broadcastWidgetUpdate(context, GoalsWidgetReceiver::class.java)
+    broadcastWidgetUpdate(context, ActivityWidgetReceiver::class.java)
+}
+
+private fun broadcastWidgetUpdate(context: Context, receiver: Class<*>) {
     try {
         val manager = AppWidgetManager.getInstance(context)
-        val receivers = listOf(
-            BudgetWidgetReceiver::class.java,
-            NetWorthWidgetReceiver::class.java,
-            GoalsWidgetReceiver::class.java,
-            ActivityWidgetReceiver::class.java,
-        )
-        for (cls in receivers) {
-            val provider = ComponentName(context, cls)
-            val ids = manager.getAppWidgetIds(provider)
-            if (ids.isNotEmpty()) {
-                manager.notifyAppWidgetViewDataChanged(ids, android.R.id.content)
-            }
+        val provider = ComponentName(context, receiver)
+        val ids = manager.getAppWidgetIds(provider)
+        if (ids.isEmpty()) return
+        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE).apply {
+            component = provider
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
         }
+        context.sendBroadcast(intent)
     } catch (t: Throwable) {
-        Log.w("WidgetRefresh", "AppWidgetManager fallback — ${t.message}")
+        Log.w("WidgetRefresh", "broadcast ${receiver.simpleName} — ${t.message}")
     }
 }
 
