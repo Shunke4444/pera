@@ -133,6 +133,18 @@ CREATE INDEX IF NOT EXISTS idx_budget_category ON budgets(categoryId);
 CREATE INDEX IF NOT EXISTS idx_recurring_account ON recurring(accountId);
 `
 
+/**
+ * Individual schema statements split from SCHEMA, so the Android Capacitor
+ * SQLite plugin can execute them one at a time via execSQL() (which doesn't
+ * handle multi-statement strings). One statement's failure won't prevent
+ * others from being created.
+ */
+export const SCHEMA_STATEMENTS: string[] = SCHEMA
+  .split(';')
+  .map((s) => s.trim())
+  .filter((s) => s.length > 0)
+  .map((s) => s + ';')
+
 /** The seven domain tables, for bulk clears (import/restore, test reset). */
 export const TABLES = [
   'accounts',

@@ -4,8 +4,8 @@
 // the schema + PRAGMAs, and runs the one-time Dexie→SQLite migration. `newId`
 // and `now` are unchanged so the rest of the app is untouched.
 
-import { hasDriver, setDriver, execute } from './sql'
-import { PRAGMAS, SCHEMA } from './schema'
+import { hasDriver, setDriver, execute, query } from './sql'
+import { SCHEMA_STATEMENTS } from './schema'
 
 export type {
   Account,
@@ -52,8 +52,55 @@ export async function initDb(): Promise<void> {
     const { createCapacitorDriver } = await import('./driver/capacitor')
     setDriver(await createCapacitorDriver())
   }
-  await execute(PRAGMAS)
-  await execute(SCHEMA)
+  // Execute each schema statement individually so a single DDL statement
+  // failing (e.g. on Android's Capacitor SQLite plugin, which splits
+  // multi-statement SQL and calls execSQL() per statement) doesn't abort
+  // ALL table creation. The accounts table is the critical one — if it
+  // doesn't exist, the app is unusable.
+  for (const stmt of SCHEMA_STATEMENTS) {
+    try {
+      await execute(stmt)
+    } catch (e) {
+      console.warn(`[Pera] Schema statement failed (continuing): ${stmt.slice(0, 80)}`, e)
+    }
+  }
+  // Verify the critical table exists before proceeding.
+  try {
+    await query('SELECT COUNT(*) FROM accounts')
+  } catch {
+    throw new Error(
+      'Schema init failed: accounts table not created. ' +
+        'Check that the SQLite database file is accessible and writable.',
+    )
+  }
+  await applyPragmas()
   const { migrateFromDexieIfNeeded } = await import('./migrate')
   await migrateFromDexieIfNeeded()
+}
+
+/**
+ * Apply connection PRAGMAs resiliently. `PRAGMA journal_mode=WAL` RETURNS a row,
+ * and on native Android the plugin's execute() path uses execSQL(), which throws
+ * for any statement that returns data — that previously aborted init BEFORE the
+ * schema ran on device, so no tables were created. journal_mode therefore goes
+ * through query() (cursor-based, allowed to return data); the value-less PRAGMAs
+ * are fine via execute(). All best-effort — a PRAGMA hiccup must never stop the
+ * database from opening.
+ */
+async function applyPragmas(): Promise<void> {
+  try {
+    await query('PRAGMA journal_mode=WAL;')
+  } catch {
+    /* engine may not support WAL (e.g. in-memory tests) — non-fatal */
+  }
+  try {
+    await execute('PRAGMA busy_timeout=5000;')
+  } catch {
+    /* best-effort */
+  }
+  try {
+    await execute('PRAGMA foreign_keys=OFF;')
+  } catch {
+    /* best-effort */
+  }
 }

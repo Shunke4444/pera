@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import App from './App'
@@ -20,11 +20,10 @@ applyTheme(getStoredTheme())
 // SQLite migration), seeds on first run (idempotent), catches up due recurring
 // rules (idempotent), then fires one change so hooks mounted before init
 // re-query (and, on native, nudges any placed widgets to re-read).
-void initDb()
+const dbReady: Promise<void> = initDb()
   .then(() => seedIfEmpty())
   .then(() => processDueRecurring())
   .then(() => emitChange())
-  .catch((err) => console.error('Pera DB init failed', err))
 
 // After every repo mutation, poke placed widgets to re-read SQLite (native only).
 initWidgetRefresh()
@@ -32,12 +31,28 @@ initWidgetRefresh()
 // Route widget deep links (pera://quick-add?...) into the app. No-op on web.
 void initDeepLinks()
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+function BootstrappedApp() {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    dbReady
+      .then(() => setReady(true))
+      .catch((err) => console.error('Pera DB init failed', err))
+  }, [])
+
+  if (!ready) return null
+
+  return (
     <ErrorBoundary>
       <HashRouter>
         <App />
       </HashRouter>
     </ErrorBoundary>
+  )
+}
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <BootstrappedApp />
   </React.StrictMode>
 )
