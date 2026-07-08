@@ -1,5 +1,6 @@
 package app.pera.tracker
 
+import android.util.Log
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
@@ -23,8 +24,8 @@ class WidgetBridgePlugin : Plugin() {
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 refreshAllWidgets(appContext)
-            } catch (_: Throwable) {
-                /* no widgets placed / transient — ignore */
+            } catch (t: Throwable) {
+                Log.w("WidgetBridge", "refreshAllWidgets failed — ${t.message}")
             }
         }
         call.resolve()

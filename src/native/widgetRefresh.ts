@@ -13,8 +13,8 @@ async function refresh(): Promise<void> {
   try {
     const { WidgetBridge } = await import('./widget')
     await WidgetBridge.refresh()
-  } catch {
-    /* no widgets placed / plugin missing — fine */
+  } catch (e) {
+    console.warn('[Pera] WidgetBridge.refresh failed —', e)
   }
 }
 
