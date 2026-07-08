@@ -1,12 +1,18 @@
 package app.pera.tracker
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.updateAll
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 // Shared action plumbing for all four widgets: the preset instant-log callback,
 // the deep-link / pop-up intents, and a refresh-all helper. Top-level keys are
@@ -52,7 +58,11 @@ class LogPresetAction : ActionCallback {
         val category = parameters[KEY_CATEGORY]?.takeIf { it.isNotEmpty() }
 
         PeraDb.insertTransaction(context, account, signed, type, category)
-        refreshAllWidgets(context)
+        // NonCancellable: Glance may cancel the action scope after onAction()
+        // body returns; updateAll() must finish to refresh the widgets.
+        withContext(Dispatchers.Default + NonCancellable) {
+            refreshAllWidgets(context)
+        }
     }
 }
 
@@ -71,10 +81,31 @@ class OpenQuickAddAction : ActionCallback {
 
 /** Recompose every Pera widget from the freshly written snapshot. */
 suspend fun refreshAllWidgets(context: Context) {
+    // 1. Glance path (primary)
     BudgetWidget().updateAll(context)
     NetWorthWidget().updateAll(context)
     GoalsWidget().updateAll(context)
     ActivityWidget().updateAll(context)
+    // 2. AppWidgetManager path (fallback) — notifies the OS directly so
+    //    widgets recompose even if Glance's coroutine scope is cancelled.
+    try {
+        val manager = AppWidgetManager.getInstance(context)
+        val receivers = listOf(
+            BudgetWidgetReceiver::class.java,
+            NetWorthWidgetReceiver::class.java,
+            GoalsWidgetReceiver::class.java,
+            ActivityWidgetReceiver::class.java,
+        )
+        for (cls in receivers) {
+            val provider = ComponentName(context, cls)
+            val ids = manager.getAppWidgetIds(provider)
+            if (ids.isNotEmpty()) {
+                manager.notifyAppWidgetViewDataChanged(ids, android.R.id.content)
+            }
+        }
+    } catch (t: Throwable) {
+        Log.w("WidgetRefresh", "AppWidgetManager fallback — ${t.message}")
+    }
 }
 
 /**
